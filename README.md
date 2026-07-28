@@ -1,31 +1,31 @@
 # ccsessions
 
-Claude Code の走行中セッションを、macOS のメニューバーに**生き物の群れ**として表示する。
-1 セッション = 1 匹。色と動きで状態が分かり、ホバーすると詳細が出る。
+Claude Code の走行中セッションを、macOS のメニューバーに生き物の群れとして表示します。
+1 セッション = 1 匹です。色と動きで状態が分かり、ホバーすると詳細が出ます。
 
 ![作業中・判断待ち・エージェント待ち・アイドル・完了・エラーの 6 状態](docs/assets/states.svg)
 
 ## インストール
 
-macOS のみ。画面収録などの特別な権限は要らない。
+macOS のみです。画面収録などの特別な権限は要りません。
 
 ```sh
 brew install S-Nakamur-a/tap/ccsessions
 brew services start ccsessions
 ```
 
-次に Claude Code の中で、状態を送る hook を入れる:
+次に Claude Code の中で、状態を送る hook を入れます:
 
 ```
 /plugin marketplace add S-Nakamur-a/ccsessions
 /plugin install ccsessions@ccsessions-marketplace
 ```
 
-**Claude Code を再起動すれば出る。** うまくいかないときは `ccsessions doctor`
-（何が入っていて何が足りないかを教える）。
+Claude Code を再起動すれば出ます。うまくいかないときは `ccsessions doctor`
+を実行してください（何が入っていて何が足りないかを教えます）。
 
 ソースからビルドする formula なので、ダウンロードした `.app` ではなく
-**Gatekeeper の「開発元を確認できません」も出ない**（Rust ツールチェインは brew が用意する）。
+Gatekeeper の「開発元を確認できません」も出ません（Rust ツールチェインは brew が用意します）。
 
 ## 設定
 
@@ -33,13 +33,13 @@ brew services start ccsessions
 ccsessions ui
 ```
 
-ブラウザが開く。メニューバーか画面下か、生き物の見た目、どれくらいで消えるか等を
-そこで決められる。**顔を自分で作れるのもここ**。
+ブラウザが開きます。メニューバーか画面下か、生き物の見た目、どれくらいで消えるか等を
+そこで決められます。顔を自分で作れるのもここです。
 
 <details>
 <summary>設定ファイルを直接書く場合</summary>
 
-`~/.config/ccsessions/config.toml`。変えた瞬間に走っている常駐が数百 ms で拾う。
+`~/.config/ccsessions/config.toml` です。変えた瞬間に走っている常駐が数百 ms で拾います。
 
 ```toml
 placement = "bar"        # "bar"（メニューバー）| "dock"（画面下）
@@ -56,8 +56,8 @@ max_sessions = 12
 detect_errors = false    # Stop 時に transcript を見てエラー終了も判定する（補助手段）
 ```
 
-bar はキーボードフォーカスのある画面のメニューバーに出る（外部モニタにも追従する）。
-顔を TOML で手書きする場合は [`faces/README.md`](faces/README.md)。
+bar はキーボードフォーカスのある画面のメニューバーに出ます（外部モニタにも追従します）。
+顔を TOML で手書きする場合は [`faces/README.md`](faces/README.md) を参照してください。
 
 </details>
 
@@ -65,15 +65,15 @@ bar はキーボードフォーカスのある画面のメニューバーに出�
 
 | 表示 | 状態 | いつ |
 |---|---|---|
-| `›` シアン・上下に揺れる・瞬きする | 作業中 | プロンプト送信後、Claude が動いている |
-| `!` 琥珀・跳ねる | 判断待ち | 許可要求・通知が出て、あなたの入力を待っている |
-| `⋯` 紫・横に漂う・横目 | エージェント待ち | サブエージェント（Task）が走っている |
-| `z` 灰・静止・薄い | アイドル | 完了して一定時間経過 |
-| `✓` 緑・静止 | 完了 | ターンが終わった直後（既定 3 分） |
-| `×` 赤・ゆっくり明滅 | エラー | 直近のターンがエラーで終わった |
+| `›` シアン・上下に揺れる・瞬きする | 作業中 | プロンプト送信後、Claude が動いています |
+| `!` 琥珀・跳ねる | 判断待ち | 許可要求・通知が出て、あなたの入力を待っています |
+| `⋯` 紫・横に漂う・横目 | エージェント待ち | サブエージェント（Task）が走っています |
+| `z` 灰・静止・薄い | アイドル | 完了して一定時間経過しました |
+| `✓` 緑・静止 | 完了 | ターンが終わった直後です（既定 3 分） |
+| `×` 赤・ゆっくり明滅 | エラー | 直近のターンがエラーで終わりました |
 
-バッジはそのセッションが走らせているエージェントの数。エラーは**グリッチではなく
-ゆっくりした呼吸**にしてある（常時視界に入るものなので、点滅で目を刺さないことを優先した）。
+バッジはそのセッションが走らせているエージェントの数です。エラーはグリッチではなく
+ゆっくりした呼吸にしてあります（常時視界に入るものなので、点滅で目を刺さないことを優先しました）。
 
 ## やめる・消す
 
@@ -86,33 +86,33 @@ bar はキーボードフォーカスのある画面のメニューバーに出�
 <details>
 <summary>設定ファイルを勝手に書き換えないこと（このツールの方針）</summary>
 
-**ccsessions は Claude Code の設定ファイルを書き換えない。** 配線するのはプラグインで、
-`settings.json` に入るのは `enabledPlugins` の 1 行だけ。**`hooks` セクションには一切
-触らない**ので、他のツールの hook を壊しようがない。購読イベントを変えたときの更新も
-プラグインの更新として届く。
+ccsessions は Claude Code の設定ファイルを書き換えません。配線するのはプラグインで、
+`settings.json` に入るのは `enabledPlugins` の 1 行だけです。`hooks` セクションには一切
+触らないので、他のツールの hook を壊しようがありません。購読イベントを変えたときの更新も
+プラグインの更新として届きます。
 
-常駐の開始（LaunchAgents）も同じで、`brew services start` を打つまで何も起きない。
+常駐の開始（LaunchAgents）も同じで、`brew services start` を打つまで何も起きません。
 
-購読しているイベントは `plugins/ccsessions/hooks/hooks.json` にある（10 個）。
+購読しているイベントは `plugins/ccsessions/hooks/hooks.json` にあります（10 個）。
 enterprise の managed settings 等でプラグインを入れられない場合は、これを参考に手で
-`settings.json` へ書く。その場合 command は `${CLAUDE_PLUGIN_ROOT}/...` ではなく
-`ccsessions hook` の絶対パスにする。**`timeout` を落とさないこと** — 省くと Claude Code
-側の既定（多くのイベントで 600 秒）が効き、hook が詰まったときにターンがそのぶん止まる。
+`settings.json` へ書いてください。その場合 command は `${CLAUDE_PLUGIN_ROOT}/...` ではなく
+`ccsessions hook` の絶対パスにします。`timeout` を落とさないでください — 省くと Claude Code
+側の既定（多くのイベントで 600 秒）が効き、hook が詰まったときにターンがそのぶん止まります。
 
 </details>
 
 <details>
 <summary>生き物が消えるとき</summary>
 
-1. セッションが普通に終わった（`SessionEnd` hook）。
-2. **セッションのプロセスが居なくなった** — 強制終了・端末を閉じた・親のツールに
-   殺された等で `SessionEnd` が飛ばなかった場合。hook が記録した pid の生存を
-   常駐が確かめる。
-3. `session_ttl_secs` のあいだ 1 度も hook が来なかった（1・2 で拾えないときの保険）。
+1. セッションが普通に終わったとき（`SessionEnd` hook）。
+2. セッションのプロセスが居なくなったとき — 強制終了・端末を閉じた・親のツールに
+   殺された等で `SessionEnd` が飛ばなかった場合です。hook が記録した pid の生存を
+   常駐が確かめます。
+3. `session_ttl_secs` のあいだ 1 度も hook が来なかったとき（1・2 で拾えないときの保険）。
 
-つまり **`session_ttl_secs` を長くしても死んだセッションは居座らない**。生存確認できない
-ときは必ず「生きている」側に倒す。消したものは `~/Library/Logs/ccsessions/ccsessionsd.log`
-に `reaped session ... — pid 12345 が居ない` の形で残る。
+つまり `session_ttl_secs` を長くしても死んだセッションは居座りません。生存確認できない
+ときは必ず「生きている」側に倒します。消したものは `~/Library/Logs/ccsessions/ccsessionsd.log`
+に `reaped session ... — pid 12345 が居ない` の形で残ります。
 
 </details>
 
@@ -121,15 +121,15 @@ enterprise の managed settings 等でプラグインを入れられない場合
 
 | 症状 | 原因 | 逃げ方 |
 |---|---|---|
-| ターンを中断（ESC）したときに状態が「作業中」のまま残る | 中断では `Stop` も `StopFailure` も来ない | 次のプロンプトを送れば戻る |
-| エラー（`×` 赤）がほとんど出ない | API エラーは `StopFailure` で取るが、それ以外の失敗は hook から見えない | — |
-| ホバーカードのエージェント行に役割ラベルが出ない | `agent_id` と Agent ツールの `description` を突き合わせる手段が payload に無い | — |
-| バッジは 32 個で頭打ちになる | `event.rs` の `MAX_AGENTS` による意図的な上限 | — |
-| **`bar_align = "center"` はノッチ機で群れが隠れる** | ノッチは画面の水平中央にあるので、中央配置は必ずその下に入る | 既定の `auto`（ノッチの右→左へ退避する）を使う。起動ログと `ccsessions doctor` も警告する |
-| メニューエクストラを増やしても群れの位置が追随しない環境がある | ノッチ右の空き幅は**実行時に計測**して追随する（最大 10 秒の遅れ）。ただし計測できない環境（非ノッチ機・メニューバー自動非表示・フルスクリーン）では**見積もりの 225pt** に落ちる | `bar_align` を `left-of-notch` か `center` にする |
-| セッションが 20 匹前後を超えると bar に収まらない | 群れの縮小には下限（0.55 倍）があり、そこから先は判読できなくなるので諦めている | `max_sessions` を下げる／`placement = "dock"` にする |
-| enterprise の managed settings に入れた hook は診断で拾えない | 走査するのはユーザ全体・プロジェクト・ローカルの settings ファイルだけ | そこに入れた場合は `doctor` の「NOT installed」を無視してよい |
-| プラグイン経由の hook は「有効になっていること」までしか分からない | プラグインが配る hook は `settings.json` の `hooks` に現れない。`doctor` が見られるのは `enabledPlugins` だけ | イベント単位で確かめたいときは `plugins/ccsessions/hooks/hooks.json` を直接見る |
+| ターンを中断（ESC）したときに状態が「作業中」のまま残ります | 中断では `Stop` も `StopFailure` も来ません | 次のプロンプトを送れば戻ります |
+| エラー（`×` 赤）がほとんど出ません | API エラーは `StopFailure` で取りますが、それ以外の失敗は hook から見えません | — |
+| ホバーカードのエージェント行に役割ラベルが出ません | `agent_id` と Agent ツールの `description` を突き合わせる手段が payload にありません | — |
+| バッジは 32 個で頭打ちになります | `event.rs` の `MAX_AGENTS` による意図的な上限です | — |
+| `bar_align = "center"` はノッチ機で群れが隠れます | ノッチは画面の水平中央にあるので、中央配置は必ずその下に入ります | 既定の `auto`（ノッチの右→左へ退避します）を使ってください。起動ログと `ccsessions doctor` も警告します |
+| メニューエクストラを増やしても群れの位置が追随しない環境があります | ノッチ右の空き幅は実行時に計測して追随します（最大 10 秒の遅れ）。ただし計測できない環境（非ノッチ機・メニューバー自動非表示・フルスクリーン）では見積もりの 225pt に落ちます | `bar_align` を `left-of-notch` か `center` にしてください |
+| セッションが 20 匹前後を超えると bar に収まりません | 群れの縮小には下限（0.55 倍）があり、そこから先は判読できなくなるので諦めています | `max_sessions` を下げるか、`placement = "dock"` にしてください |
+| enterprise の managed settings に入れた hook は診断で拾えません | 走査するのはユーザ全体・プロジェクト・ローカルの settings ファイルだけです | そこに入れた場合は `doctor` の「NOT installed」を無視して構いません |
+| プラグイン経由の hook は「有効になっていること」までしか分かりません | プラグインが配る hook は `settings.json` の `hooks` に現れません。`doctor` が見られるのは `enabledPlugins` だけです | イベント単位で確かめたいときは `plugins/ccsessions/hooks/hooks.json` を直接見てください |
 
 </details>
 
@@ -153,18 +153,18 @@ make demo    # 6 状態のダミーセッションで見た目を確認（実セ
 make help    # ターゲット一覧
 ```
 
-前提は [rustup](https://rustup.rs/) の Rust ツールチェイン（MSRV 1.89）。
-`make install` で `~/.cargo/bin` へ入れ、`make start` で常駐する。
-**`brew services` と両方で常駐させると生き物が二重に出る**ので、どちらか一方にすること
-（`ccsessions doctor` が検出する）。hook は開発中もプラグインで入れる —
+前提は [rustup](https://rustup.rs/) の Rust ツールチェイン（MSRV 1.89）です。
+`make install` で `~/.cargo/bin` へ入れ、`make start` で常駐します。
+`brew services` と両方で常駐させると生き物が二重に出るので、どちらか一方にしてください
+（`ccsessions doctor` が検出します）。hook は開発中もプラグインで入れます —
 チェックアウトをそのまま marketplace として使えるので、`/plugin marketplace add .`
-→ `/plugin install ccsessions@ccsessions-marketplace`。
+→ `/plugin install ccsessions@ccsessions-marketplace` としてください。
 
-- **[`docs/how-it-works.md`](docs/how-it-works.md)** — hook からオーバーレイまでの流れ、
+- [`docs/how-it-works.md`](docs/how-it-works.md) — hook からオーバーレイまでの流れ、
   購読しているイベント、なぜ CALayer 直描きなのか
-- **[`docs/invariants.md`](docs/invariants.md)** — 崩してはいけない不変条件
-- **[`docs/adr/`](docs/adr/README.md)** — なぜ他の案を採らなかったのか
-- **[`faces/README.md`](faces/README.md)** — 顔（生き物のデザイン）の作り方。Rust は要らない
+- [`docs/invariants.md`](docs/invariants.md) — 崩してはいけない不変条件
+- [`docs/adr/`](docs/adr/README.md) — なぜ他の案を採らなかったのか
+- [`faces/README.md`](faces/README.md) — 顔（生き物のデザイン）の作り方。Rust は要りません
 
 ## ライセンス
 
