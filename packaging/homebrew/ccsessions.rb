@@ -21,7 +21,7 @@ class Ccsessions < Formula
   url "https://github.com/S-Nakamur-a/ccsessions/archive/refs/tags/v0.1.0.tar.gz"
   # タグを push したあとに差し替える:
   #   curl -sL https://github.com/S-Nakamur-a/ccsessions/archive/refs/tags/v0.1.0.tar.gz | shasum -a 256
-  sha256 "FILL_IN_AFTER_TAGGING"
+  sha256 "96865d6ccc23da649c0a775dcccf7faca7589b08ffe5e168d50795af1cd7e860"
   license "MIT"
   head "https://github.com/S-Nakamur-a/ccsessions.git", branch: "main"
 
