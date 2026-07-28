@@ -18,10 +18,10 @@
 class Ccsessions < Formula
   desc "Menu bar overlay showing running Claude Code sessions as a flock of creatures"
   homepage "https://github.com/S-Nakamur-a/ccsessions"
-  url "https://github.com/S-Nakamur-a/ccsessions/archive/refs/tags/v0.1.0.tar.gz"
+  url "https://github.com/S-Nakamur-a/ccsessions/archive/refs/tags/v0.1.1.tar.gz"
   # タグを push したあとに差し替える:
-  #   curl -sL https://github.com/S-Nakamur-a/ccsessions/archive/refs/tags/v0.1.0.tar.gz | shasum -a 256
-  sha256 "96865d6ccc23da649c0a775dcccf7faca7589b08ffe5e168d50795af1cd7e860"
+  #   curl -sL https://github.com/S-Nakamur-a/ccsessions/archive/refs/tags/v0.1.1.tar.gz | shasum -a 256
+  sha256 "353a148cfa6c877c96501a5ffaa3b0561c6ce22104cf660309bc483f214cc429"
   license "MIT"
   head "https://github.com/S-Nakamur-a/ccsessions.git", branch: "main"
 
