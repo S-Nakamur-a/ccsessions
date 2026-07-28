@@ -1,8 +1,9 @@
 # 0021 · 配布は Homebrew の source formula と Claude Code プラグイン
 
 採用 · 2026-07-25 — 改訂 2026-07-29
-（改名・プラグイン・formula の原本・doctor の検出まで実装済み。
-残るのは GitHub repo の作成・タグ・tap への配置と `sha256` 埋め）
+（**2026-07-29 に配布まで完了**。リポジトリ公開・`v0.1.0` タグ・tap への配置・
+`sha256` 埋めまで実施し、brew とプラグインの両導線が通ることを実機で確認した。
+詳細は[下記](#配り終えた2026-07-29)）
 
 ## 文脈
 
@@ -99,6 +100,30 @@ LICENSE（MIT）と `Cargo.toml` のメタデータは入れた（共通項目�
   ブロッカーではない**（formula 側は `depends_on :macos` で閉じられる）。効くのは
   `cargo install` の導線を残す場合だけ。
 - ~~**名前**~~ — **2026-07-28 に `ccstatus` → `ccsessions` へ改名して解消**（下記）。
+
+## 配り終えた（2026-07-29）
+
+この ADR が設計した 3 本の導線を全部通した。
+
+| | 実体 | 確認方法 |
+|---|---|---|
+| リポジトリ | `S-Nakamur-a/ccsessions`（public・`v0.1.0`） | CI（macos-15）が両ジョブ green |
+| tap | `S-Nakamur-a/homebrew-tap` の `Formula/ccsessions.rb` | `brew install` / `brew test` / `brew audit --strict --online` が全部通る |
+| プラグイン | リポジトリ自身が marketplace | `/plugin marketplace add S-Nakamur-a/ccsessions` を実機で実行 |
+
+実機で確かめて分かったことを 2 つ残す。
+
+- **`publish = false` は `cargo install --path` を妨げない。** formula は
+  `std_cargo_args(path:)` 経由で `cargo install --locked --path` を打つだけなので、
+  crates.io に出さない判断と source formula は両立する（懸念していたが問題なかった）。
+- **ログの親ディレクトリは本当に `brew services` が作った。** 上で「formula が
+  prefix の外へ mkdir する必要はない」と書いた読みは正しく、`brew services start`
+  の直後に `~/Library/Logs/ccsessions/` が生えた。
+
+**リリース手順は 4 手**（タグ → tarball の `sha256` → 原本の `url`/`sha256` 差し替え
+→ tap へコピー）。原本と tap に同じ formula が 2 つある構造なので、片方だけ直すと
+静かにずれる。原本をこのリポジトリに置く判断（レビュー可能性）とのトレードオフで、
+承知のうえで受けている。
 
 ## `install-hooks` を消した（2026-07-29）
 

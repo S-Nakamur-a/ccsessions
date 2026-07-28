@@ -84,11 +84,15 @@ store を更新する。`settings_json.rs` は `~/.claude/settings.json` を**�
 
 ## 未実装
 
-配布の「外に出す」部分だけ（[`docs/adr/0021-distribution.md`](docs/adr/0021-distribution.md)）。
-リポジトリ内の実体は揃っている — formula の原本は `packaging/homebrew/ccsessions.rb`、
-Claude Code プラグインは `.claude-plugin/marketplace.json` + `plugins/ccsessions/`
-（**リポジトリ自身が marketplace**）。残っているのは GitHub repo の作成・タグ・
-tap への配置と、formula の `sha256` 埋め。
+**配布は 2026-07-29 に完了した**（[`docs/adr/0021-distribution.md`](docs/adr/0021-distribution.md)）。
+リポジトリ公開・`v0.1.0` タグ・tap（`S-Nakamur-a/homebrew-tap`）への formula 配置・
+`sha256` 埋めまで済んでいて、`brew install S-Nakamur-a/tap/ccsessions` と
+`/plugin marketplace add S-Nakamur-a/ccsessions` の両方が実際に通る。
+
+リリースのたびに要るのは、タグを切る → tarball の `sha256` を取る →
+`packaging/homebrew/ccsessions.rb`（原本）の `url` / `sha256` を差し替える →
+tap の `Formula/ccsessions.rb` へコピー、の 4 手。**原本と tap の 2 か所に同じ
+formula がある**ので、片方だけ直すとずれる。
 
 イベント一覧と timeout は Rust の定数と `hooks.json` の 2 か所にある。**真実は
 `settings_json.rs` の `SIMPLE_EVENTS` / `hook_timeout_secs` の 1 か所**で、

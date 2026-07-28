@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="624" height="64" viewBox="0 0 624 64" role="img" aria-label="ccsessions の 6 状態: 作業中・判断待ち・エージェント待ち・アイドル・完了・エラー">
+<title>ccsessions — 6 つの状態</title>
+<rect width="624" height="64" rx="8" fill="#0b0912"/>
+<svg x="32" y="6" width="39" height="36" viewBox="0 0 39 36">
+
+
+<g opacity="1" transform="translate(8,8)">
+  <path d="M 9.840 18.500 L 10.660 18.500 C 16.094 18.500 20.500 15.021 20.500 10.730 L 20.500 10.730 C 20.500 4.804 15.911 0.000 10.250 0.000 L 10.250 0.000 C 4.589 0.000 0.000 4.804 0.000 10.730 L 0.000 10.730 C 0.000 15.021 4.406 18.500 9.840 18.500 Z" transform="translate(0.75,0.75)" fill="#242b45" stroke="#00e1e2" stroke-width="1.5"/>
+  <rect x="6.500" y="8.000" width="3.000" height="4.000" rx="2.000" fill="#eef2ff"/>
+  <rect x="12.500" y="8.000" width="3.000" height="4.000" rx="2.000" fill="#eef2ff"/>
+  <text x="24.000" y="-2.000" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="#00e1e2" text-anchor="middle">›</text>
+</g>
+</svg>
+<text x="52" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">作業中</text>
+<svg x="136" y="6" width="39" height="36" viewBox="0 0 39 36">
+
+
+<g opacity="1" transform="translate(8,8)">
+  <path d="M 9.840 18.500 L 10.660 18.500 C 16.094 18.500 20.500 15.021 20.500 10.730 L 20.500 10.730 C 20.500 4.804 15.911 0.000 10.250 0.000 L 10.250 0.000 C 4.589 0.000 0.000 4.804 0.000 10.730 L 0.000 10.730 C 0.000 15.021 4.406 18.500 9.840 18.500 Z" transform="translate(0.75,0.75)" fill="#3a253a" stroke="#fbc044" stroke-width="1.5"/>
+  <rect x="5.500" y="8.000" width="4.000" height="4.000" rx="2.000" fill="#ffffff"/>
+  <rect x="12.500" y="8.000" width="4.000" height="4.000" rx="2.000" fill="#ffffff"/>
+  <text x="24.000" y="-2.000" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="#fbc044" text-anchor="middle">!</text>
+</g>
+</svg>
+<text x="156" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">判断待ち</text>
+<svg x="240" y="6" width="39" height="36" viewBox="0 0 39 36">
+
+
+<g opacity="1" transform="translate(8,8)">
+  <path d="M 9.840 18.500 L 10.660 18.500 C 16.094 18.500 20.500 15.021 20.500 10.730 L 20.500 10.730 C 20.500 4.804 15.911 0.000 10.250 0.000 L 10.250 0.000 C 4.589 0.000 0.000 4.804 0.000 10.730 L 0.000 10.730 C 0.000 15.021 4.406 18.500 9.840 18.500 Z" transform="translate(0.75,0.75)" fill="#28233d" stroke="#9c95fe" stroke-width="1.5"/>
+  <rect x="8.000" y="8.000" width="3.000" height="4.000" rx="2.000" fill="#eef2ff"/>
+  <rect x="14.000" y="8.000" width="3.000" height="4.000" rx="2.000" fill="#eef2ff"/>
+  <text x="24.000" y="-2.000" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="#9c95fe" text-anchor="middle">⋯</text>
+</g>
+</svg>
+<text x="260" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">エージェント待ち</text>
+<svg x="344" y="6" width="39" height="36" viewBox="0 0 39 36">
+
+
+<g opacity="0.55" transform="translate(8,8)">
+  <path d="M 9.840 18.500 L 10.660 18.500 C 16.094 18.500 20.500 15.021 20.500 10.730 L 20.500 10.730 C 20.500 4.804 15.911 0.000 10.250 0.000 L 10.250 0.000 C 4.589 0.000 0.000 4.804 0.000 10.730 L 0.000 10.730 C 0.000 15.021 4.406 18.500 9.840 18.500 Z" transform="translate(0.75,0.75)" fill="#20202a" stroke="#79818d" stroke-width="1.5"/>
+  <rect x="5.500" y="9.000" width="4.000" height="2.000" rx="1.000" fill="#c6ccdb"/>
+  <rect x="12.500" y="9.000" width="4.000" height="2.000" rx="1.000" fill="#c6ccdb"/>
+  <text x="24.000" y="-2.000" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="#79818d" text-anchor="middle">z</text>
+</g>
+</svg>
+<text x="364" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">アイドル</text>
+<svg x="448" y="6" width="39" height="36" viewBox="0 0 39 36">
+
+
+<g opacity="0.9" transform="translate(8,8)">
+  <path d="M 9.840 18.500 L 10.660 18.500 C 16.094 18.500 20.500 15.021 20.500 10.730 L 20.500 10.730 C 20.500 4.804 15.911 0.000 10.250 0.000 L 10.250 0.000 C 4.589 0.000 0.000 4.804 0.000 10.730 L 0.000 10.730 C 0.000 15.021 4.406 18.500 9.840 18.500 Z" transform="translate(0.75,0.75)" fill="#1e2b45" stroke="#60db89" stroke-width="1.5"/>
+  <rect x="6.500" y="8.000" width="3.000" height="4.000" rx="2.000" fill="#eef2ff"/>
+  <rect x="12.500" y="8.000" width="3.000" height="4.000" rx="2.000" fill="#eef2ff"/>
+  <text x="24.000" y="-2.000" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="#60db89" text-anchor="middle">✓</text>
+</g>
+</svg>
+<text x="468" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">完了</text>
+<svg x="552" y="6" width="39" height="36" viewBox="0 0 39 36">
+
+
+<g opacity="1" transform="translate(8,8)">
+  <path d="M 9.840 18.500 L 10.660 18.500 C 16.094 18.500 20.500 15.021 20.500 10.730 L 20.500 10.730 C 20.500 4.804 15.911 0.000 10.250 0.000 L 10.250 0.000 C 4.589 0.000 0.000 4.804 0.000 10.730 L 0.000 10.730 C 0.000 15.021 4.406 18.500 9.840 18.500 Z" transform="translate(0.75,0.75)" fill="#2c1b34" stroke="#dc5e59" stroke-width="1.5"/>
+  <rect x="6.500" y="8.000" width="3.000" height="4.000" rx="2.000" fill="#ffa299"/>
+  <rect x="12.500" y="8.000" width="3.000" height="4.000" rx="2.000" fill="#ffa299"/>
+  <text x="24.000" y="-2.000" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="#dc5e59" text-anchor="middle">×</text>
+</g>
+</svg>
+<text x="572" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">エラー</text>
+</svg>

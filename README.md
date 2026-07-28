@@ -1,10 +1,65 @@
 # ccsessions
 
-Claude Code の走行中セッションを、macOS のメニューバー（または画面下のドック）に
-**生き物の群れ**として常時表示する常駐オーバーレイ。
+Claude Code の走行中セッションを、macOS のメニューバーに**生き物の群れ**として表示する。
+1 セッション = 1 匹。色と動きで状態が分かり、ホバーすると詳細が出る。
 
-1 セッション = 1 匹。体の色と動きで状態が分かり、バッジはそのセッションが走らせている
-エージェントの数、ホバーするとセッション名・状態・経過時間・エージェント一覧が出る。
+![作業中・判断待ち・エージェント待ち・アイドル・完了・エラーの 6 状態](docs/assets/states.svg)
+
+## インストール
+
+macOS のみ。画面収録などの特別な権限は要らない。
+
+```sh
+brew install S-Nakamur-a/tap/ccsessions
+brew services start ccsessions
+```
+
+次に Claude Code の中で、状態を送る hook を入れる:
+
+```
+/plugin marketplace add S-Nakamur-a/ccsessions
+/plugin install ccsessions@ccsessions-marketplace
+```
+
+**Claude Code を再起動すれば出る。** うまくいかないときは `ccsessions doctor`
+（何が入っていて何が足りないかを教える）。
+
+ソースからビルドする formula なので、ダウンロードした `.app` ではなく
+**Gatekeeper の「開発元を確認できません」も出ない**（Rust ツールチェインは brew が用意する）。
+
+## 設定
+
+```sh
+ccsessions ui
+```
+
+ブラウザが開く。メニューバーか画面下か、生き物の見た目、どれくらいで消えるか等を
+そこで決められる。**顔を自分で作れるのもここ**。
+
+<details>
+<summary>設定ファイルを直接書く場合</summary>
+
+`~/.config/ccsessions/config.toml`。変えた瞬間に走っている常駐が数百 ms で拾う。
+
+```toml
+placement = "bar"        # "bar"（メニューバー）| "dock"（画面下）
+design = "egg"           # 組込みは "egg" | "round" | "squircle" | "bean"
+                         # 自作の顔の id も書ける
+reduce_motion = false
+show_glyphs = true       # 状態記号（› ! ⋯ z ✓ ×）を出す
+bar_align = "auto"       # "auto" | "center" | "left-of-notch" | "right-of-notch"
+compact_flock = "auto"   # セッションが増えて入り切らなくなったら群れを縮める
+                         # "auto"（既定）| "always"（常に縮める）| "never"（縮めない）
+done_ttl_secs = 180      # 完了 → アイドルに変わるまで
+session_ttl_secs = 28800 # これだけ無更新なら生き物を消す（保険。下記参照）
+max_sessions = 12
+detect_errors = false    # Stop 時に transcript を見てエラー終了も判定する（補助手段）
+```
+
+bar はキーボードフォーカスのある画面のメニューバーに出る（外部モニタにも追従する）。
+顔を TOML で手書きする場合は [`faces/README.md`](faces/README.md)。
+
+</details>
 
 ## 状態
 
@@ -17,115 +72,52 @@ Claude Code の走行中セッションを、macOS のメニューバー（ま�
 | `✓` 緑・静止 | 完了 | ターンが終わった直後（既定 3 分） |
 | `×` 赤・ゆっくり明滅 | エラー | 直近のターンがエラーで終わった |
 
-エラーは**グリッチではなくゆっくりした呼吸**にしてある（常時視界に入るものなので、
-点滅で目を刺さないことを優先した）。
+バッジはそのセッションが走らせているエージェントの数。エラーは**グリッチではなく
+ゆっくりした呼吸**にしてある（常時視界に入るものなので、点滅で目を刺さないことを優先した）。
 
-## インストール
-
-前提は **macOS** だけ（`ccsessionsd` は AppKit / CoreAnimation を直に叩くので macOS 専用）。
-特別な権限（画面収録など）は要らない。
-
-```sh
-brew install S-Nakamur-a/tap/ccsessions
-```
-
-> **tap はまだ公開していない。** それまではソースから入れる →
-> [開発者向けの入れ方](#開発者向けの入れ方)。
-
-ソースからビルドする formula なので、Rust ツールチェインは Homebrew が用意する。
-ダウンロードした `.app` ではないため `com.apple.quarantine` が付かず、Gatekeeper の
-確認も公証も要らない（[ADR 0021](docs/adr/0021-distribution.md)）。
-
-**入れただけでは何も起きない。** hook の配線と常駐の開始は、どちらも
-`ccsessions` が勝手にやらない — あなたの `settings.json` と LaunchAgents は、
-あなたが明示的に操作したときだけ変わる。
-
-```sh
-brew services start ccsessions   # 常駐開始（以降はログイン時に自動起動）
-```
-
-hook は **Claude Code のプラグイン**で入れる。Claude Code の中で:
-
-```
-/plugin marketplace add S-Nakamur-a/ccsessions
-/plugin install ccsessions@ccsessions-marketplace
-```
-
-こちらだと `settings.json` に入るのは `enabledPlugins` の 1 行だけで、**`hooks`
-セクションには一切触らない**。購読イベントを変えたときの更新もプラグインの更新で
-届く。プラグインを使えない環境での逃げ方は[下記](#hook-の入れ方)。
+## やめる・消す
 
 | したいこと | コマンド |
 |---|---|
-| 導入状況を確認する | `ccsessions doctor` |
 | 常駐を止める | `brew services stop ccsessions` |
 | hook を外す | Claude Code で `/plugin uninstall ccsessions@ccsessions-marketplace` |
 | 丸ごと消す | 上の 2 つ → `brew uninstall ccsessions` |
 
-### hook の入れ方
+<details>
+<summary>設定ファイルを勝手に書き換えないこと（このツールの方針）</summary>
 
-**ccsessions は Claude Code の設定ファイルを書き換えない。** 配線するのは
-プラグインで、`settings.json` に入るのは `enabledPlugins` の 1 行だけ。
-`hooks` セクションには一切触らないので、他のツールの hook を壊しようがない。
+**ccsessions は Claude Code の設定ファイルを書き換えない。** 配線するのはプラグインで、
+`settings.json` に入るのは `enabledPlugins` の 1 行だけ。**`hooks` セクションには一切
+触らない**ので、他のツールの hook を壊しようがない。購読イベントを変えたときの更新も
+プラグインの更新として届く。
 
-```
-/plugin marketplace add S-Nakamur-a/ccsessions
-/plugin install ccsessions@ccsessions-marketplace
-```
+常駐の開始（LaunchAgents）も同じで、`brew services start` を打つまで何も起きない。
 
-購読するイベントは `plugins/ccsessions/hooks/hooks.json` にある（10 個）。
-イベント構成を変えたときの更新も、プラグインの更新として届く。
+購読しているイベントは `plugins/ccsessions/hooks/hooks.json` にある（10 個）。
+enterprise の managed settings 等でプラグインを入れられない場合は、これを参考に手で
+`settings.json` へ書く。その場合 command は `${CLAUDE_PLUGIN_ROOT}/...` ではなく
+`ccsessions hook` の絶対パスにする。**`timeout` を落とさないこと** — 省くと Claude Code
+側の既定（多くのイベントで 600 秒）が効き、hook が詰まったときにターンがそのぶん止まる。
 
-外すのは `/plugin uninstall ccsessions@ccsessions-marketplace`。
-導入状況の確認は `ccsessions doctor`（分割された設定ファイルも走査する）。
+</details>
 
-プラグインを使えない環境（enterprise の managed settings 等）では、
-`hooks.json` を参考に手で `settings.json` へ書く。その場合 command は
-`${CLAUDE_PLUGIN_ROOT}/...` ではなく `ccsessions hook` の絶対パスにする。
-**`timeout` を落とさないこと** — 省くと Claude Code 側の既定（多くのイベントで
-600 秒）が効き、hook が詰まったときにターンがそのぶん止まる。
-
-## 設定
-
-やり方は 2 つあり、どちらも同じ `~/.config/ccsessions/config.toml` を書く。
-変えた瞬間に走っている `ccsessionsd` が数百 ms で拾う。
-
-```sh
-make config          # Web UI（http://127.0.0.1:8787/）。生き物の見た目もここで作れる
-$EDITOR ~/.config/ccsessions/config.toml   # 直接編集でもよい（ccsessions config set も同じ）
-```
-
-```toml
-placement = "bar"        # "bar"（メニューバー）| "dock"（画面下）
-design = "egg"           # 組込みは "egg" | "round" | "squircle" | "bean"
-                         # 自作の顔の id も書ける
-reduce_motion = false
-show_glyphs = true       # 状態記号（› ! ⋯ z ✓ ×）を出す
-bar_align = "auto"       # "auto" | "center" | "left-of-notch" | "right-of-notch"
-compact_flock = "auto"   # セッションが増えて入り切らなくなったら群れを縮める
-                         # "auto"（既定）| "always"（常に縮める）| "never"（縮めない）
-done_ttl_secs = 180      # 完了 → アイドルに変わるまで
-session_ttl_secs = 28800 # これだけ無更新なら生き物を消す（下記のとおり保険）
-max_sessions = 12
-detect_errors = false    # Stop 時に transcript を見てエラー終了も判定する（補助手段）
-```
-
-bar はキーボードフォーカスのある画面のメニューバーに出る（外部モニタにも追従する）。
-顔を TOML で自分で書く場合は [`faces/README.md`](faces/README.md)。
-
-## 生き物が消えるとき
+<details>
+<summary>生き物が消えるとき</summary>
 
 1. セッションが普通に終わった（`SessionEnd` hook）。
 2. **セッションのプロセスが居なくなった** — 強制終了・端末を閉じた・親のツールに
    殺された等で `SessionEnd` が飛ばなかった場合。hook が記録した pid の生存を
-   `ccsessionsd` が確かめる。
+   常駐が確かめる。
 3. `session_ttl_secs` のあいだ 1 度も hook が来なかった（1・2 で拾えないときの保険）。
 
 つまり **`session_ttl_secs` を長くしても死んだセッションは居座らない**。生存確認できない
-ときは必ず「生きている」側に倒す。消したものは `~/Library/Logs/ccsessions/ccsessionsd.log` に
-`reaped session ... — pid 12345 が居ない` の形で残る。
+ときは必ず「生きている」側に倒す。消したものは `~/Library/Logs/ccsessions/ccsessionsd.log`
+に `reaped session ... — pid 12345 が居ない` の形で残る。
 
-## 既知の制限
+</details>
+
+<details>
+<summary>既知の制限</summary>
 
 | 症状 | 原因 | 逃げ方 |
 |---|---|---|
@@ -139,48 +131,34 @@ bar はキーボードフォーカスのある画面のメニューバーに出�
 | enterprise の managed settings に入れた hook は診断で拾えない | 走査するのはユーザ全体・プロジェクト・ローカルの settings ファイルだけ | そこに入れた場合は `doctor` の「NOT installed」を無視してよい |
 | プラグイン経由の hook は「有効になっていること」までしか分からない | プラグインが配る hook は `settings.json` の `hooks` に現れない。`doctor` が見られるのは `enabledPlugins` だけ | イベント単位で確かめたいときは `plugins/ccsessions/hooks/hooks.json` を直接見る |
 
+</details>
+
 ## CLI
 
 ```sh
 ccsessions list [--json]        # 生きているセッションの一覧
-ccsessions ui                   # 設定 + 顔作りの Web UI ＝ make config
+ccsessions ui                   # 設定 + 顔作りの Web UI
 ccsessions config get|set|path  # 設定の表示・変更（UI と同じ検証を通る）
 ccsessions doctor               # 診断
+ccsessions face list|render     # 顔の一覧・SVG プレビュー
 ccsessions hook                 # Claude Code の hook が呼ぶ（stdin から JSON）
 ```
 
 ## 開発
 
-`make` は開発者向けで、エンドユーザの導線（`brew` + `brew services`）とは独立している。
-**両方で常駐させると生き物が二重に出る**ので、どちらか一方にすること
-（`ccsessions doctor` が検出する）。
-
-### 開発者向けの入れ方
-
-前提は [rustup](https://rustup.rs/) の Rust ツールチェイン（MSRV 1.89）と、
-`~/.cargo/bin` が `PATH` に入っていること。
-
-```sh
-make install   # release ビルドして ~/.cargo/bin へ入れる
-make start     # LaunchAgent に登録して常駐開始（以降はログイン時に自動起動）
-```
-
-hook は開発中もプラグインで入れる。チェックアウトをそのまま marketplace として
-使えるので、Claude Code の中で `/plugin marketplace add .`（リポジトリのルート）
-→ `/plugin install ccsessions@ccsessions-marketplace`。
-
-`make start` はビルドしない — 更新を取り込むのは `make deploy`（ビルドして入れ直し、
-常駐を入れ替える）。止めるのは `make stop`、丸ごと外すのは `make uninstall`
-（**hook はプラグイン側なので触らない**）。
-
-### よく使うターゲット
-
 ```sh
 make check   # fmt --check + clippy -D warnings + test（コミット前の品質ゲート）
-make dev     # 走行中の daemon を止めて build → dev バイナリを起動（install 不要）
+make dev     # 走行中の常駐を止めて build → dev バイナリを起動（install 不要）
 make demo    # 6 状態のダミーセッションで見た目を確認（実セッション不要）
 make help    # ターゲット一覧
 ```
+
+前提は [rustup](https://rustup.rs/) の Rust ツールチェイン（MSRV 1.89）。
+`make install` で `~/.cargo/bin` へ入れ、`make start` で常駐する。
+**`brew services` と両方で常駐させると生き物が二重に出る**ので、どちらか一方にすること
+（`ccsessions doctor` が検出する）。hook は開発中もプラグインで入れる —
+チェックアウトをそのまま marketplace として使えるので、`/plugin marketplace add .`
+→ `/plugin install ccsessions@ccsessions-marketplace`。
 
 - **[`docs/how-it-works.md`](docs/how-it-works.md)** — hook からオーバーレイまでの流れ、
   購読しているイベント、なぜ CALayer 直描きなのか
