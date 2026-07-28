@@ -1,0 +1,9 @@
+/target
+*.bak.*
+*.ccsessions-bak.*
+.DS_Store
+
+# 作業中の調査・計画メモ（公開しない。残す決定だけ docs/adr/ に畳んである）
+docs/plans/
+# 開発に使っているラッパーツールの作業ディレクトリ
+.conductor/

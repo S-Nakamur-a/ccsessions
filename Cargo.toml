@@ -1,0 +1,28 @@
+[workspace]
+members = ["ccsessions-core", "ccsessions", "ccsessionsd"]
+resolver = "2"
+
+# 3 crate で共通のメタデータはここに置き、各 crate は `field.workspace = true` で
+# 引き継ぐ。版・ライセンス・リポジトリが crate ごとにずれるのを防ぐため。
+#
+# `publish = false` は据え置き。名前の衝突は `ccsessions` への改名で解消したが
+# （[`docs/adr/0021-distribution.md`](docs/adr/0021-distribution.md)）、**配布導線は
+# 自前 tap の source formula で、crates.io に publish する必要が無い**。formula は
+# GitHub の tarball を落として `cargo build --locked` するだけで、crates.io を見るのは
+# 依存 crate の取得だけ。crates.io にも出すと決めたときにここを外す
+# （publish は取り消せないので、決めてから）。
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+# MSRV。**下限は `lock.rs` が握っている**（`File::try_lock` と `fs::TryLockError`
+# が 1.89 で安定化した）。README の導線が `cargo install`＝ソースビルドなので、
+# ここを宣言していないと古い toolchain の人が「解決できない型エラー」を踏む。
+# cargo は宣言があれば「rustc 1.89 以上が要る」と名指しで教えてくれる。
+# 上げるときは CI の msrv ジョブ（`.github/workflows/ci.yml`）の版も一緒に動かす。
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/S-Nakamur-a/ccsessions"
+readme = "README.md"
+keywords = ["claude-code", "macos", "menubar", "overlay", "sessions"]
+categories = ["command-line-utilities"]
+publish = false

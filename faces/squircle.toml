@@ -1,0 +1,21 @@
+# かく — 角丸長方形。元デザインの CSS: border-radius: bar ? 7px : 10px。
+
+id       = "squircle"
+label    = "かく"
+label_en = "Squircle"
+
+[size]
+bar  = { w = 22, h = 20 }
+dock = { w = 36, h = 34 }
+
+[outline]
+kind = "corners"
+# **pt 固定の角丸**。比率にすると bar と dock で角の丸みの見た目が変わってしまう。
+# 解決時に体の半分（w/2・h/2）でクランプされる。
+corners_pt = { bar = 7.0, dock = 10.0 }
+
+[eyes]
+shape  = "rounded"
+gap    = { bar = 3.0, dock = 5.0 }
+size   = { bar = [3.0, 4.0], dock = [4.0, 6.0] }
+radius = 2.0

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ccsessions</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header>
+  <h1>ccsessions</h1>
+
+  <!-- 画面の切り替え。設定とキャラクタービルダーはここ 1 つに統合してある
+       （メニューバーの status item は無くなった）。 -->
+  <nav id="views" role="tablist">
+    <button data-view="settings" class="on">設定</button>
+    <button data-view="builder">キャラクター</button>
+  </nav>
+
+  <!-- キャラクター画面のときだけ出る（設定画面には関係ない）。 -->
+  <div class="ident builder-only">
+    <label>名前<input id="f-name" type="text" autocomplete="off"></label>
+    <label>id<input id="f-id" type="text" autocomplete="off" spellcheck="false"></label>
+    <label>作者<input id="f-author" type="text" autocomplete="off" placeholder="任意"></label>
+  </div>
+
+  <div class="actions builder-only">
+    <button id="b-random" class="primary" title="キーボードの R でも">🎲 ランダム</button>
+    <button id="b-save">顔として保存</button>
+    <span class="sep"></span>
+    <button id="b-json">JSON を書き出す</button>
+    <button id="b-open">JSON を読み込む</button>
+    <button id="b-svg">SVG</button>
+    <button id="b-png">PNG</button>
+    <input id="f-file" type="file" accept="application/json,.json" hidden>
+  </div>
+</header>
+
+<!-- ── 設定 ───────────────────────────────────────────────────────────── -->
+<main id="view-settings">
+  <section id="settings">
+    <p class="hint">
+      変えた瞬間に <code>config.toml</code> へ書き、走っている <code>ccsessionsd</code> が
+      数百 ms で拾う。<span id="config-path" class="path"></span>
+    </p>
+    <!-- 中身は /api/config が返すスキーマから組み立てる（この HTML には
+         設定のキーを 1 つも書かない ＝ 設定を足しても触らなくてよい）。 -->
+    <div id="fields"></div>
+  </section>
+
+  <section id="settings-side">
+    <h2>生き物</h2>
+    <!-- design の選択肢。プレビューは daemon が描くのと同じ face::svg の出力。 -->
+    <div id="face-picker"></div>
+    <p class="hint">
+      顔を自分で作るには上の<strong>キャラクター</strong>へ。保存するとここに出る。
+    </p>
+  </section>
+</main>
+
+<!-- ── キャラクタービルダー ───────────────────────────────────────────── -->
+<main id="view-builder" hidden>
+  <!-- パーツ選択。中身は /api/parts の内容から組み立てる（この HTML には
+       カテゴリもパーツも書かない ＝ パーツを足しても触らなくてよい）。 -->
+  <section id="picker">
+    <nav id="tabs" role="tablist"></nav>
+    <div id="grid" role="listbox" aria-label="パーツ"></div>
+    <div id="tweaks"></div>
+  </section>
+
+  <section id="stage">
+    <div id="preview" aria-live="polite"></div>
+
+    <div class="row" id="sizes">
+      <button data-size="dock" class="on">dock（画面下）</button>
+      <button data-size="bar">bar（メニューバー）</button>
+    </div>
+
+    <p class="hint">
+      色とアニメは<strong>状態</strong>が決める（顔ごとには変えられない）。
+      6 つ並べて実際の配色を確かめる。
+    </p>
+    <div id="states"></div>
+
+    <label class="eyecolor">目の色
+      <select id="f-eyecolor"></select>
+    </label>
+
+    <p id="fit" class="hint"></p>
+  </section>
+
+  <section id="side">
+    <div id="problems"></div>
+
+    <h2>保存した顔</h2>
+    <div id="saved"></div>
+
+    <details id="toml-box">
+      <summary>生成される <code>&lt;id&gt;.toml</code></summary>
+      <pre id="toml"></pre>
+    </details>
+
+    <details>
+      <summary>パーツを足すには</summary>
+      <div class="doc">
+        <p><code>ccsessions-core/src/face/builder/parts.rs</code> の表に
+        <strong>1 行足すだけ</strong>。この画面は <code>/api/parts</code> が返す表を
+        列挙して描くので、HTML も JS も触らなくてよい。</p>
+        <pre>// 髪を 1 つ足す
+line("bob-short", "ショートボブ", Curve::Arc, 0.72, 0.90, 0.06),
+
+// カテゴリごと足す（眉・耳・アクセサリ）
+LineCategory { id: "brow", label: "眉", on_bar: false, variants: BROW },</pre>
+        <p><code>cargo test -p ccsessions-core face::builder</code> が
+        「全パーツ × 全輪郭が検証を通る」ことを確かめる。</p>
+      </div>
+    </details>
+  </section>
+</main>
+
+<div id="toast" role="status"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

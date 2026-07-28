@@ -1,0 +1,20 @@
+# まる — 真円。元デザインの CSS: border-radius: 50%（体も正方形）。
+
+id       = "round"
+label    = "まる"
+label_en = "Round"
+
+[size]
+bar  = { w = 20, h = 20 }
+dock = { w = 32, h = 32 }
+
+[outline]
+kind = "corners"
+# 体が正方形なので、4 隅とも半径が幅・高さの半分＝比率 0.5 で真円になる。
+corners = [[0.50, 0.50], [0.50, 0.50], [0.50, 0.50], [0.50, 0.50]]
+
+[eyes]
+shape  = "rounded"
+gap    = { bar = 3.0, dock = 5.0 }
+size   = { bar = [3.0, 4.0], dock = [4.0, 6.0] }
+radius = 2.0

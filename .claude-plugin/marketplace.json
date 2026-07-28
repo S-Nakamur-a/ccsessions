@@ -1,0 +1,14 @@
+{
+  "name": "ccsessions-marketplace",
+  "description": "Claude Code のセッションをメニューバーに群れとして表示する ccsessions の hook 配線",
+  "owner": {
+    "name": "S-Nakamur-a"
+  },
+  "plugins": [
+    {
+      "name": "ccsessions",
+      "source": "./plugins/ccsessions",
+      "description": "走行中の Claude Code セッションを ccsessions に伝える hook。バイナリ（brew install S-Nakamur-a/tap/ccsessions）が別途要る"
+    }
+  ]
+}

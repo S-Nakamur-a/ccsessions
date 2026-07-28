@@ -1,0 +1,27 @@
+[package]
+name = "ccsessions-core"
+description = "Core logic for ccsessions: session model, hook reducer, store, config, and face definitions (no macOS dependency)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+# 用途は `process.rs` のプロセス生存確認だけ。バージョンは既存の依存グラフと
+# 同じ 0.2 系に合わせる。
+#   - `kill(pid,0)`  … プロセステーブルに居るか（POSIX。macOS 非依存の方針は崩れない）。
+#   - `proc_pidinfo` … それがゾンビでないか（macOS 固有。`is_zombie` の doc を参照）。
+# ストアのロック（`lock.rs`）はかつてここで `flock(2)` を呼んでいたが、
+# `File::try_lock`（Rust 1.89 で安定化・Unix では実体が flock）に置き換えた。
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

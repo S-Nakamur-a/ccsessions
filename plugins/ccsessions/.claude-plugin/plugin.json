@@ -1,0 +1,9 @@
+{
+  "name": "ccsessions",
+  "description": "走行中の Claude Code セッションをメニューバーの群れに反映させる hook。表示する常駐（ccsessionsd）とバイナリは brew install S-Nakamur-a/tap/ccsessions で別途入れる",
+  "version": "0.1.0",
+  "author": {
+    "name": "S-Nakamur-a"
+  },
+  "homepage": "https://github.com/S-Nakamur-a/ccsessions"
+}

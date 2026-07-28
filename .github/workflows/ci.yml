@@ -1,0 +1,71 @@
+# 品質ゲート。**中身は `make check` そのもの**にしてある。
+# ここに fmt / clippy / test を書き下すと、手元のゲートと CI のゲートが 2 か所に
+# 分かれて片方だけ腐る（「手元では通ったのに CI で落ちる」の主要因）。
+#
+# runner は macOS だけ。`ccsessionsd` は AppKit / CoreAnimation を直に叩き、
+# `ccsessions-core/src/process.rs` のゾンビ判定も macOS 固有（`proc_pidinfo`）なので、
+# Linux で回しても守れる不変条件が無い（[`docs/adr/0021-distribution.md`](../../docs/adr/0021-distribution.md)）。
+#
+# GUI は要らない。テストは FFI を含まない層（`theme` / `layout` / `geometry`）に
+# 閉じてあり、`ccsessions/tests/cli.rs` は状態ディレクトリも `$HOME` も tempdir へ
+# 差し替えてから実プロセスを起こす。headless runner で完結する。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 既定の書き込み権限を落とす。この workflow は読むだけで、リリースも
+# コメント投稿もしない。
+permissions:
+  contents: read
+
+# 同じ PR に続けて push したら古い実行は捨てる（macOS runner は枠が細い）。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: make check (stable)
+    # 版は固定する。macOS の版が動くと AppKit の挙動も動くので、上げるのは
+    # 「上げた」と分かる形でやりたい。
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Cargo.lock はコミットしてある（bin crate なので再現性のため）。
+      # 手元で依存を足して lock を入れ忘れた PR をここで落とす。
+      # `--locked` は lock が古ければエラーになり、ビルドはしない＝速い。
+      - name: Cargo.lock が最新か
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: fmt --check + clippy -D warnings + test
+        run: make check
+
+  msrv:
+    name: MSRV (1.89)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      # Cargo.toml の `rust-version` と同じ版を名指しする。**両方動かすこと**。
+      # ここが宣言より新しいと、宣言した下限が誰にも検証されないまま腐る。
+      - uses: dtolnay/rust-toolchain@1.89.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      # 下限では「コンパイルが通ること」だけを見る。lint は版によって増減するので
+      # clippy を MSRV で回すと、コードの問題ではない失敗が出る。
+      - name: cargo check
+        run: cargo check --all-targets --locked

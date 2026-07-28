@@ -1,0 +1,397 @@
+/* ccsessions キャラクタービルダー。
+   色は face/palette.rs の値に合わせてある（INK #0b0912 / 目 #eef2ff）ので、
+   プレビューの SVG が画面から浮かない。 */
+
+:root {
+  --ink: #0b0912;
+  --panel: #141220;
+  --panel-2: #1b1828;
+  --line: #2a2740;
+  --text: #e6e9f0;
+  --dim: #8b93a7;
+  --accent: #00e1e2;
+  --bad: #dc5e58;
+  --warn: #fbc044;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+/* **`display` を指定した要素の `hidden` 属性は効かない**（`main` は grid、
+   ヘッダの部品は flex なので、そのままだと画面を切り替えても両方出たままになる）。
+   画面の出し分けは `hidden` 1 つでやると決めたので、ここで効かせる。 */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+button, input, select {
+  font: inherit;
+  color: inherit;
+}
+
+/* ── ヘッダ ───────────────────────────────────────────────────────────── */
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  padding: 12px 18px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+h1 {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: .02em;
+}
+h1 span { color: var(--dim); font-weight: 400; }
+
+.ident { display: flex; gap: 10px; flex-wrap: wrap; }
+.ident label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 11px;
+}
+.ident input {
+  width: 130px;
+  padding: 5px 8px;
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.ident input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+#f-id { width: 110px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.actions { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.actions .sep { width: 1px; background: var(--line); margin: 2px 4px; }
+
+button {
+  padding: 6px 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: #17323a; border-color: #1f5b63; }
+button.on { background: #17323a; border-color: var(--accent); }
+
+/* ── 全体レイアウト ────────────────────────────────────────────────────── */
+
+main {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.1fr) minmax(260px, 0.9fr) minmax(280px, 1fr);
+  gap: 14px;
+  padding: 14px 18px 40px;
+  align-items: start;
+}
+@media (max-width: 1080px) {
+  main { grid-template-columns: 1fr; }
+}
+
+/* 設定は 2 段組（項目 / 生き物）。キャラクター画面の 3 段組より広く取る。 */
+#view-settings {
+  grid-template-columns: minmax(340px, 1.15fr) minmax(300px, 1fr);
+}
+@media (max-width: 1080px) {
+  #view-settings { grid-template-columns: 1fr; }
+}
+
+section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+/* ── 画面の切り替え ────────────────────────────────────────────────────── */
+
+#views { display: flex; gap: 4px; }
+#views button { padding: 5px 14px; }
+
+/* ── 設定 ──────────────────────────────────────────────────────────────── */
+
+.path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--dim);
+  word-break: break-all;
+}
+
+.field {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.field:first-child { border-top: 0; padding-top: 2px; }
+
+.field-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.field-label { font-size: 12.5px; font-weight: 600; }
+.field-key {
+  font-size: 10.5px;
+  color: var(--dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.field .hint { margin: 5px 0 0; }
+
+/* 選択肢はセグメント（選択中が一目で分かる・押した瞬間に保存される）。 */
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button { padding: 5px 12px; }
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+.toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
+.toggle-text { font-size: 11px; color: var(--dim); font-family: ui-monospace, Menlo, monospace; }
+
+.num { display: flex; align-items: center; gap: 7px; }
+.num input {
+  width: 110px;
+  padding: 5px 8px;
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.num input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+.num .unit, .num .coord-value { font-size: 11px; color: var(--dim); }
+.num button { padding: 3px 9px; font-size: 11px; }
+
+/* 顔の選択。プレビューはメニューに並べていたものをそのまま持ってきた。 */
+#face-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(82px, 1fr));
+  gap: 6px;
+}
+#face-picker .chip { position: relative; }
+#face-picker .chip svg { width: 54px; }
+.badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  padding: 0 4px;
+  border-radius: 5px;
+  background: #17323a;
+  color: var(--accent);
+  font-size: 9px;
+}
+
+h2 { font-size: 12px; color: var(--dim); margin: 14px 0 6px; font-weight: 600; }
+h2:first-child { margin-top: 0; }
+
+/* ── パーツ選択 ────────────────────────────────────────────────────────── */
+
+#tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+#tabs button { padding: 5px 10px; }
+
+.picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--dim);
+  font-size: 11px;
+}
+.picker-head .nav { display: flex; gap: 4px; }
+.picker-head .nav button { padding: 2px 9px; }
+
+#grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+  gap: 6px;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 3px 4px;
+  background: var(--panel-2);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: center;
+}
+.chip:hover { border-color: var(--line); }
+.chip.on { border-color: var(--accent); background: #16232c; }
+.chip svg { width: 46px; height: auto; border-radius: 6px; }
+.chip .name {
+  font-size: 10px;
+  color: var(--dim);
+  line-height: 1.25;
+  word-break: break-all;
+}
+.chip.on .name { color: var(--text); }
+
+/* ── 微調整 ────────────────────────────────────────────────────────────── */
+
+#tweaks { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.tweak {
+  display: grid;
+  grid-template-columns: 68px 1fr 46px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--dim);
+}
+.tweak input[type=range] { width: 100%; accent-color: var(--accent); }
+.tweak .val { text-align: right; font-family: ui-monospace, Menlo, monospace; }
+.tweak-bar { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--dim); margin-top: 6px; }
+#tweaks .reset { margin-top: 8px; }
+
+/* ── プレビュー ────────────────────────────────────────────────────────── */
+
+#stage { text-align: center; }
+
+#preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 190px;
+  padding: 10px;
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+#preview svg { width: auto; height: 160px; }
+#preview.bar svg { height: 80px; }
+
+.row { display: flex; gap: 6px; justify-content: center; margin-top: 10px; }
+
+#states {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 5px;
+  margin-top: 6px;
+}
+.state {
+  padding: 4px 2px;
+  background: var(--panel-2);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.state.on { border-color: var(--accent); }
+.state svg { width: 100%; height: auto; border-radius: 6px; }
+.state .name { font-size: 9.5px; color: var(--dim); }
+
+.hint { color: var(--dim); font-size: 11px; margin: 10px 0 4px; }
+.hint strong { color: var(--text); font-weight: 600; }
+
+.eyecolor {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--dim);
+  font-size: 11px;
+}
+.eyecolor select {
+  padding: 4px 8px;
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+/* ── 右側 ──────────────────────────────────────────────────────────────── */
+
+#problems:empty { display: none; }
+.problem {
+  display: flex;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  margin-bottom: 5px;
+  font-size: 11.5px;
+  background: #2a1620;
+  border: 1px solid #5c2b33;
+}
+.problem.warn { background: #2a2415; border-color: #5c4a1f; }
+.problem.ok { background: #14261d; border-color: #23503a; }
+.problem code {
+  flex: none;
+  color: var(--bad);
+  font-family: ui-monospace, Menlo, monospace;
+}
+.problem.warn code { color: var(--warn); }
+.problem.ok code { color: #5fd39a; }
+
+.saved-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: var(--panel-2);
+  margin-bottom: 4px;
+  font-size: 11.5px;
+}
+.saved-item .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved-item .id { color: var(--dim); font-family: ui-monospace, Menlo, monospace; }
+.saved-item button { padding: 2px 8px; font-size: 11px; }
+.saved-empty { color: var(--dim); font-size: 11.5px; }
+
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--dim); font-size: 11.5px; }
+pre {
+  margin: 8px 0 0;
+  padding: 9px;
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-height: 320px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre;
+}
+.doc { font-size: 11.5px; color: var(--dim); }
+.doc code { color: var(--text); font-family: ui-monospace, Menlo, monospace; }
+
+/* ── トースト ──────────────────────────────────────────────────────────── */
+
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%) translateY(14px);
+  padding: 9px 16px;
+  background: var(--panel-2);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  font-size: 12px;
+  max-width: min(76vw, 640px);
+  white-space: pre-wrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s, transform .18s;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+#toast.bad { border-color: var(--bad); }

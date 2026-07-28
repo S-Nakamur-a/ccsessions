@@ -1,0 +1,25 @@
+# まめ — 幅広のカプセル。元デザインの CSS: border-radius: h/2。
+
+id       = "bean"
+label    = "まめ"
+label_en = "Bean"
+
+[size]
+bar  = { w = 28, h = 20 }
+dock = { w = 44, h = 34 }
+
+[outline]
+# カプセル（左右が半円 ＝ 4 隅とも半径が縦横とも h/2）。
+#
+# これは corners でも corners_pt でも書けないので専用の kind になっている:
+#   - 比率だと水平半径が h/2 なので比率は h/(2w)。bar は 10/28 = 0.357、
+#     dock は 17/44 = 0.386 で値が変わり、1 つの記述で両立しない
+#   - pt 固定だと、枠線幅ぶん内側に縮めた輪郭（h が 20 → 18.5）に追従できず
+#     カプセルでなくなる
+kind = "capsule"
+
+[eyes]
+shape  = "rounded"
+gap    = { bar = 3.0, dock = 5.0 }
+size   = { bar = [3.0, 4.0], dock = [4.0, 6.0] }
+radius = 2.0

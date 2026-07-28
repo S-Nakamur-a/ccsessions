@@ -1,0 +1,23 @@
+[package]
+name = "ccsessions"
+description = "CLI and Claude Code hook producer for ccsessions, plus the web UI for settings and face building"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "ccsessions"
+path = "src/main.rs"
+
+[dependencies]
+ccsessions-core = { path = "../ccsessions-core" }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+tempfile = "3"
