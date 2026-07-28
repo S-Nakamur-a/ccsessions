@@ -118,9 +118,21 @@ read-modify-write 全体ではない。
 （8 時間）居座り、`max_sessions` の枠を食って生きているセッションを押し出していた
 （同じ作業ディレクトリのゾンビが 9 匹並び、枠 12 のうち 9 を占有した）。
 
-`ccsessions hook` が毎回**自分の親 pid（＝ Claude Code 本体）**を記録し、
+`ccsessions hook` が毎回**セッションの持ち主の pid（＝ Claude Code 本体）**を記録し、
 `Session::dead_reason` が `process::is_alive` で生存を見る。
 
+- **持ち主は「直接の親」ではない。祖先をたどってシェルを読み飛ばした先**にいる。
+  直接の親を持ち主にしていた頃、プラグインが配る `ccsessions-hook.sh` を経由すると
+  **全セッションが表示されなくなった**（`v0.1.0` の実害）。ラッパーは「何があっても
+  exit 0」を守るため `exec` を使わず、`ccsessions hook` から見た親は**ラッパーの
+  `sh`** になる。それは hook が終わった瞬間に死ぬので、書いた直後に死んだ判定で
+  一掃されていた（`reaped session ccsessions — pid 15801 が居ない`／持ち主の
+  claude は 15780 だった）。hook もストアも daemon も正常なのに何も出ない、という
+  壊れ方をする。番人は
+  `cli.rs::a_session_recorded_through_the_plugin_wrapper_is_still_live_afterwards`
+  （本物のラッパーを本物の `sh` で起動する）。
+  **`make demo` はこの経路を通らない**（`main.rs` がメモリ上のダミーを描く）ので、
+  表示まわりを demo だけで確かめても検出できない。
 - **「存在するか」だけでは足りない。ゾンビ（終了したが親が `wait` していない残骸）を
   明示的に弾く**。`kill(pid, 0)` はゾンビにも成功を返すので、回収しない親の下では pid
   判定が丸ごと無効化される（ラッパーツールが配下の `claude` を `wait` しないことがあり、

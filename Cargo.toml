@@ -12,7 +12,7 @@ resolver = "2"
 # 依存 crate の取得だけ。crates.io にも出すと決めたときにここを外す
 # （publish は取り消せないので、決めてから）。
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 # MSRV。**下限は `lock.rs` が握っている**（`File::try_lock` と `fs::TryLockError`
 # が 1.89 で安定化した）。README の導線が `cargo install`＝ソースビルドなので、

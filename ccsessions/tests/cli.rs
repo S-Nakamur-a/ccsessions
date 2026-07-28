@@ -304,6 +304,83 @@ fn hook_records_the_owning_process_pid() {
     );
 }
 
+/// **番人: プラグインが配るラッパー越しでも、セッションが生きたまま見えること。**
+///
+/// 実際に踏んだ不具合の再現テスト。`ccsessions-hook.sh` は `exec` を使わない
+/// （「何があっても exit 0」を守るため）ので、`ccsessions hook` から見た直接の親は
+/// **ラッパーの `sh`** になる。それを持ち主として記録していた頃は、hook が書いた
+/// セッションの pid が数ミリ秒で死に、`ccsessionsd` が 0.5 秒以内に「pid が居ない」
+/// と回収していた（`reaped session ... — pid 15801 が居ない`）。hook もストアも
+/// daemon も正常なのに、**メニューバーには何も出ない**という壊れ方をする。
+///
+/// 単体テストは作り物の系図で `resolve_owner` を見るだけなので、ここでは
+/// **本物のラッパーを本物の `sh` で起動して**、経路ごと固定する。ラッパーを
+/// `exec` 無しのまま持ち主判定を直接の親に戻すと、このテストが落ちる。
+///
+/// テストプロセス（シェルではない）がラッパーを起こすので、claude 本体に
+/// 相当する持ち主は自分自身。
+#[test]
+fn a_session_recorded_through_the_plugin_wrapper_is_still_live_afterwards() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let state = dir.path().join("state");
+
+    // ラッパーは `command -v ccsessions` で PATH から拾う。**PATH をこの
+    // tempdir だけにして**、brew で入っている本物ではなくビルドしたバイナリを
+    // 必ず使わせる（実ユーザの環境に結果を左右させない）。
+    let bin_dir = dir.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    std::os::unix::fs::symlink(bin(), bin_dir.join("ccsessions")).unwrap();
+
+    let wrapper = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../plugins/ccsessions/hooks/ccsessions-hook.sh");
+    assert!(
+        wrapper.exists(),
+        "プラグインのラッパーが見つからない: {wrapper:?}"
+    );
+
+    // `sh` は絶対パスで起こす（PATH をこの tempdir だけに絞るため、PATH からは
+    // 引けない）。Claude Code が `sh "<script>"` を起動するのと同じ形。
+    let mut child = Command::new("/bin/sh")
+        .arg(&wrapper)
+        .env("PATH", &bin_dir)
+        .env("CCSESSIONS_STATE_DIR", &state)
+        .env("CCSESSIONS_CONFIG", state.join("config.toml"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(payload("sess-wrapped", "SessionStart", "/tmp/wrapped-proj").as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "ラッパーは必ず exit 0");
+    assert!(out.stdout.is_empty(), "ラッパーは stdout を汚さない");
+
+    // ここが要点。ラッパーの `sh` はもう終了しているので、その pid を記録して
+    // いたら死んだセッション扱いになる。
+    assert_eq!(
+        saved_session(&state, "sess-wrapped")["pid"].as_u64(),
+        Some(u64::from(std::process::id())),
+        "ラッパーの sh ではなく、それを起動した側を持ち主として記録するはず"
+    );
+
+    let listed = Command::new(bin())
+        .arg("list")
+        .env("CCSESSIONS_STATE_DIR", &state)
+        .env("CCSESSIONS_CONFIG", state.join("config.toml"))
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&listed.stdout);
+    assert!(
+        stdout.contains("wrapped-proj"),
+        "ラッパー経由で作ったセッションが一覧に出るはず: {stdout:?}"
+    );
+}
+
 /// 以後のイベントでも押し直されること（`--resume` で別プロセスが引き継いだ
 /// ときに古い pid が残らないため）。
 #[test]
