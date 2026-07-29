@@ -2,7 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-（コード内のコメント・doc comment・ドキュメントはすべて日本語で書かれている。追記するときも日本語で揃える）
+（コード内のコメント・doc comment・ドキュメントはすべて日本語で書かれている。追記するときも日本語で揃える。
+例外はリポジトリ直下の `README.md` — ここだけ英語が正で、日本語版は `README.ja.md` に置く。
+README を直したら必ず両方を更新する）
+
+**ユーザに出力する文字列は別のルールに従う**（[ADR 0025](docs/adr/0025-ui-is-bilingual-diagnostics-are-english.md)）。
+画面の文言（設定・ビルダー・ホバーカード）は `lang::L { ja, en }` の対訳で持ち、診断
+（`doctor`・CLI のヘルプとエラー・顔の検証メッセージ・`config.toml` のコメント）は英語で固定。
+顔パーツのバリエーション名は画面に出さないので日本語のままでよい。
 
 ## コマンド
 

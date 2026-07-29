@@ -1,5 +1,10 @@
 //! `ccsessions doctor` — 現在の設定・状態ディレクトリ・hook 導入状況を
 //! まとめて表示する診断コマンド。
+//!
+//! **出力は英語で固定**（設定の `language` に従わない）。この出力は issue に
+//! 貼られるものなので、貼った人と読む人の言語が違ってよい方が都合がよい。
+//! 切り替え機構に載せないぶん、辞書もテストの言語分岐も要らない
+//! （[ADR 0025](../../docs/adr/0025-ui-is-bilingual-diagnostics-are-english.md)）。
 
 use ccsessions_core::config::{BarAlign, Placement};
 use ccsessions_core::{config, now_ms, state_dir, store};
@@ -69,7 +74,7 @@ pub fn run() -> i32 {
     println!("live sessions:   {}", live.len());
     if stale > 0 {
         println!(
-            "stale entries:   {stale} (次の掃除で消える。ccsessionsd が常駐していれば 1 分以内)"
+            "stale entries:   {stale} (removed by the next sweep — within a minute if ccsessionsd is running)"
         );
     }
     println!("placement:       {}", cfg.placement.as_str());
@@ -88,8 +93,8 @@ pub fn run() -> i32 {
         // （`ccsessionsd::geometry` の `center_hits_notch` が実測込みで固定している）。
         // 実行中の Mac がノッチ機かはここでは分からないので、bar × center を
         // 選んだ全ユーザに一律で知らせる（`ccsessionsd` 側は起動時に実測して警告する）。
-        println!("                 ⚠ ノッチのある Mac では群れがノッチの下に隠れます。");
-        println!("                   隠れる場合は \"auto\"（既定）にしてください。");
+        println!("                 ⚠ On a Mac with a notch the flock hides underneath it.");
+        println!("                   Use \"auto\" (the default) if that happens.");
     }
     // プラグイン経由の配線。hook 本体は settings.json の `hooks` に現れないので
     // `MARKER` の走査では見つからない。`enabledPlugins` だけが手掛かりになる。
@@ -102,15 +107,15 @@ pub fn run() -> i32 {
         })
         .collect();
     for key in &plugins {
-        println!("plugin:          {key} (hook はプラグインが配る)");
+        println!("plugin:          {key} (the plugin ships the hooks)");
     }
     if installed.is_empty() && !plugins.is_empty() {
         // プラグインが配線を持っているので、これは正常な状態。
         // ここで「NOT installed」と言うと、入れた人に嘘をつくことになる。
-        println!("hooks:           プラグイン経由（settings.json の hooks は使っていない）");
+        println!("hooks:           via the plugin (the hooks section of settings.json is unused)");
     } else if installed.is_empty() {
         println!("hooks:           NOT installed in any settings file it knows about");
-        println!("                 Claude Code の中で次を実行する:");
+        println!("                 Run this inside Claude Code:");
         println!("                   /plugin marketplace add S-Nakamur-a/ccsessions");
         println!("                   /plugin install ccsessions@ccsessions-marketplace");
     } else {
@@ -124,12 +129,10 @@ pub fn run() -> i32 {
             // **状態は壊れない** — reducer は agent_id で冪等なので、同じ payload が
             // 2 回来ても生き物もエージェント数も変わらない（`reduce_subagent_start`）。
             // 壊れないぶん気づきにくいので、無駄だと明示しておく。
-            println!("                 ⚠ プラグインと settings.json の両方から配線されています。");
-            println!(
-                "                   表示は壊れませんが、イベントごとにプロセスが 2 つ起きます。"
-            );
-            println!("                   どちらか一方にすること（プラグインを使うなら、");
-            println!("                   上のファイルから ccsessions のエントリを手で消す）");
+            println!("                 ⚠ Wired up from BOTH the plugin and settings.json.");
+            println!("                   Nothing breaks, but every event starts two processes.");
+            println!("                   Keep one of them (if you keep the plugin, remove the");
+            println!("                   ccsessions entries from the file above by hand)");
         }
     }
     if missing_events.is_empty() {
@@ -141,7 +144,7 @@ pub fn run() -> i32 {
         // 手で書いた配線が欠けている場合。ccsessions はもう settings.json を
         // 書かないので、直すのは手か、プラグインへの乗り換え。
         println!("hook events:     missing {}", missing_events.join(", "));
-        println!("                 手で足すか、プラグインに移ること");
+        println!("                 Add them by hand, or move over to the plugin");
     }
     for (path, _) in &installed {
         let root = read_or_empty(path).unwrap_or_else(|_| serde_json::json!({}));
@@ -150,12 +153,12 @@ pub fn run() -> i32 {
         let recording = events_with_recording_enabled(&root);
         if !recording.is_empty() {
             println!(
-                "recording:       {} で --record が有効のまま（{}）",
+                "recording:       --record is still on for {} ({})",
                 recording.join(", "),
                 path.display()
             );
-            println!("                 payload にはユーザの生プロンプトが含まれる。");
-            println!("                 開発用の一時設定なら外すこと");
+            println!("                 The payloads contain your raw prompts.");
+            println!("                 Remove it if it was a temporary development setting");
         }
         // 旧バージョンは PreToolUse(matcher=Task) を仕込んでいた。今はサブエージェント
         // の追跡を SubagentStart に一本化したので reducer はこのイベントを無視する
@@ -165,8 +168,8 @@ pub fn run() -> i32 {
                 "stale hook:      {STALE_PRE_TOOL_USE_EVENT} has a ccsessions entry but is no longer used"
             );
             println!("                 ({})", path.display());
-            println!("                 ツール呼び出しごとにプロセスを 1 つ無駄にするだけなので、");
-            println!("                 手で消すこと");
+            println!("                 It only wastes one process per tool call — remove it");
+            println!("                 by hand");
         }
     }
     for line in residency_lines(&installed_residencies(&home_dir()), running_daemons()) {
@@ -210,7 +213,7 @@ const RESIDENCIES: &[Residency] = &[
     },
     Residency {
         label: "dev.ccstatus.ccstatusd",
-        origin: "改名前の make start",
+        origin: "make start, before the rename",
         legacy: true,
     },
 ];
@@ -252,18 +255,18 @@ fn running_daemons() -> Option<usize> {
 fn residency_lines(installed: &[&'static Residency], running: Option<usize>) -> Vec<String> {
     let mut out = Vec::new();
     match installed {
-        [] => out.push("daemon:          常駐の設定なし（群れは出ない）".to_string()),
+        [] => out.push("daemon:          not set up to run (no flock will appear)".to_string()),
         [only] => {
             out.push(format!("daemon:          {} ({})", only.label, only.origin));
             if only.legacy {
                 // 二重起動より静かで、より紛らわしい状態。群れは出ているのに、
                 // 新しい名前で書いた設定も hook も一切効かない。
                 out.push(
-                    "                 ⚠ 走っているのは改名前の常駐です。新しい設定・hook は"
+                    "                 ⚠ This is the daemon from before the rename. It reads"
                         .to_string(),
                 );
                 out.push(
-                    "                   読まれません。`make stop` で止めてから `make start`"
+                    "                   none of the new config or hooks. `make stop`, then `make start`"
                         .to_string(),
                 );
             }
@@ -272,27 +275,28 @@ fn residency_lines(installed: &[&'static Residency], running: Option<usize>) -> 
             // 二重起動。**どちらが正しいかは ccsessions には決められない**ので、
             // 消し方だけ示して選択はユーザに残す。
             out.push(format!(
-                "daemon:          ⚠ 常駐の入口が {} 個ある — 生き物が二重に出ます",
+                "daemon:          ⚠ {} ways to run it are set up — the creatures appear twice",
                 many.len()
             ));
             for r in many {
                 out.push(format!("                   {} ({})", r.label, r.origin));
             }
             out.push(
-                "                 1 つだけ残すこと。`make stop` / `brew services stop ccsessions`"
+                "                 Keep only one. `make stop` / `brew services stop ccsessions`"
                     .to_string(),
             );
-            out.push("                 で止めてから、要らない方の plist を消す".to_string());
+            out.push(
+                "                 to stop it, then delete the plist you do not want".to_string(),
+            );
         }
     }
     match running {
         // plist が 1 つでも、`make dev` と併走していれば 2 つ走る。
         Some(n) if n > 1 => out.push(format!(
-            "                 ⚠ 常駐が {n} 個走っています（`make dev` の走らせっぱなしも含む）"
+            "                 ⚠ {n} daemons are running (including a `make dev` left behind)"
         )),
-        Some(0) if !installed.is_empty() => out.push(
-            "                 ⚠ 仕込まれているが走っていません（`make start` で開始）".to_string(),
-        ),
+        Some(0) if !installed.is_empty() => out
+            .push("                 ⚠ Set up but not running (`make start` to begin)".to_string()),
         _ => {}
     }
     out
@@ -344,7 +348,7 @@ mod tests {
             ],
             Some(2),
         );
-        assert!(out.contains("二重に出ます"));
+        assert!(out.contains("appear twice"));
         // どちらを消すかはユーザが決めるので、両方の出所が見えている必要がある。
         assert!(out.contains("make start"));
         assert!(out.contains("brew services start"));
@@ -361,7 +365,7 @@ mod tests {
             ],
             Some(2),
         );
-        assert!(out.contains("二重に出ます"));
+        assert!(out.contains("appear twice"));
         assert!(out.contains("dev.ccstatus.ccstatusd"));
     }
 
@@ -374,13 +378,13 @@ mod tests {
             out.contains('⚠'),
             "旧常駐だけの状態を正常と言ってはいけない: {out}"
         );
-        assert!(out.contains("改名前の常駐"));
+        assert!(out.contains("before the rename"));
     }
 
     #[test]
     fn no_residency_says_the_flock_will_not_appear() {
         let out = joined(&[], Some(0));
-        assert!(out.contains("常駐の設定なし"));
+        assert!(out.contains("not set up to run"));
         // plist が無いなら「走っていない」は当たり前で、警告にはしない。
         assert!(!out.contains('⚠'), "{out}");
     }
@@ -388,7 +392,7 @@ mod tests {
     #[test]
     fn an_installed_but_stopped_daemon_is_reported() {
         let out = joined(&[residency("dev.ccsessions.ccsessionsd")], Some(0));
-        assert!(out.contains("走っていません"));
+        assert!(out.contains("not running"));
     }
 
     #[test]
@@ -396,7 +400,7 @@ mod tests {
         // `pgrep` が無い・呼べない環境で「走っていません」と出すと、
         // 動いている常駐を止めさせる嘘の診断になる。
         let out = joined(&[residency("dev.ccsessions.ccsessionsd")], None);
-        assert!(!out.contains("走っていません"), "{out}");
+        assert!(!out.contains("not running"), "{out}");
         assert!(!out.contains('⚠'), "{out}");
     }
 
@@ -404,6 +408,6 @@ mod tests {
     fn more_than_one_running_daemon_warns_even_with_a_single_plist() {
         // `make dev` の走らせっぱなしは plist を増やさないが、群れは二重に出る。
         let out = joined(&[residency("dev.ccsessions.ccsessionsd")], Some(2));
-        assert!(out.contains("2 個走っています"));
+        assert!(out.contains("2 daemons are running"));
     }
 }

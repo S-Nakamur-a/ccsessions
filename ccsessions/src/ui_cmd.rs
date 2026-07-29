@@ -50,6 +50,7 @@ use std::path::{Path, PathBuf};
 use ccsessions_core::config::{self, FieldKind};
 use ccsessions_core::face::builder::{self, CharacterConfig};
 use ccsessions_core::face::{svg, EyeColor, Registry, Size};
+use ccsessions_core::lang::{l, Lang};
 use ccsessions_core::session::SessionState;
 use serde_json::{json, Value};
 
@@ -98,7 +99,7 @@ pub fn run(args: &[String]) -> i32 {
         match args[i].as_str() {
             "--port" => {
                 let Some(v) = args.get(i + 1).and_then(|v| v.parse::<u16>().ok()) else {
-                    eprintln!("ccsessions: ui: --port には 1..65535 の数を渡してください");
+                    eprintln!("ccsessions: ui: --port takes a number in 1..65535");
                     return 1;
                 };
                 port = v;
@@ -106,7 +107,7 @@ pub fn run(args: &[String]) -> i32 {
             }
             "--faces-dir" => {
                 let Some(v) = args.get(i + 1) else {
-                    eprintln!("ccsessions: ui: --faces-dir に値がありません");
+                    eprintln!("ccsessions: ui: --faces-dir needs a value");
                     return 1;
                 };
                 faces_dir = Some(PathBuf::from(v));
@@ -114,7 +115,7 @@ pub fn run(args: &[String]) -> i32 {
             }
             "--config" => {
                 let Some(v) = args.get(i + 1) else {
-                    eprintln!("ccsessions: ui: --config に値がありません");
+                    eprintln!("ccsessions: ui: --config needs a value");
                     return 1;
                 };
                 config_path = Some(PathBuf::from(v));
@@ -125,7 +126,7 @@ pub fn run(args: &[String]) -> i32 {
                 i += 1;
             }
             other => {
-                eprintln!("ccsessions: ui: 未知の引数 {other:?}");
+                eprintln!("ccsessions: ui: unknown argument {other:?}");
                 eprintln!(
                     "usage: ccsessions ui [--port <n>] [--faces-dir <path>] [--config <path>] [--no-open]"
                 );
@@ -140,17 +141,17 @@ pub fn run(args: &[String]) -> i32 {
     };
     let Some((listener, bound)) = bind(port) else {
         eprintln!(
-            "ccsessions: ui: ポート {port}〜{} がすべて塞がっています。--port で別の番号を指定してください",
+            "ccsessions: ui: ports {port}..{} are all taken. Pass a different one with --port",
             port.saturating_add(PORT_TRIES - 1)
         );
         return 1;
     };
 
     let url = format!("http://127.0.0.1:{bound}/");
-    println!("ccsessions 設定 / キャラクタービルダー: {url}");
-    println!("設定: {}", paths.config_path.display());
-    println!("顔の保存先: {}", paths.faces_dir.display());
-    println!("止めるには Ctrl-C。");
+    println!("ccsessions settings / character builder: {url}");
+    println!("settings: {}", paths.config_path.display());
+    println!("faces are saved to: {}", paths.faces_dir.display());
+    println!("Ctrl-C to stop.");
     if open_browser {
         // 開けなくても致命的ではない（URL は上に出してある）。
         let _ = std::process::Command::new("open").arg(&url).status();
@@ -192,6 +193,8 @@ struct Request {
     host: String,
     origin: String,
     content_type: String,
+    /// ブラウザの言語。設定が `language = "auto"` のときだけ使う。
+    accept_language: String,
     body: String,
 }
 
@@ -237,13 +240,13 @@ fn guard(req: &Request, port: u16) -> Option<(u16, &'static str, String)> {
 
     let host = req.host.split(':').next().unwrap_or("");
     if !matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1") {
-        return deny(403, "localhost 以外の Host からは使えません");
+        return deny(403, "only reachable with a localhost Host header");
     }
 
     if !req.origin.is_empty() && !is_own_origin(&req.origin, port) {
         return deny(
             403,
-            "他のページからは使えません（このツールは自分のブラウザ専用です）",
+            "not usable from another page (this tool is for your own browser only)",
         );
     }
 
@@ -258,7 +261,7 @@ fn guard(req: &Request, port: u16) -> Option<(u16, &'static str, String)> {
             .trim()
             .to_ascii_lowercase();
         if base != "application/json" {
-            return deny(415, "Content-Type: application/json で送ってください");
+            return deny(415, "send it with Content-Type: application/json");
         }
     }
 
@@ -293,6 +296,7 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> std::io::Result<Option<Req
     let mut host = String::new();
     let mut origin = String::new();
     let mut content_type = String::new();
+    let mut accept_language = String::new();
     loop {
         let mut h = String::new();
         if reader.read_line(&mut h)? == 0 {
@@ -309,6 +313,7 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> std::io::Result<Option<Req
                 "host" => host = v.to_string(),
                 "origin" => origin = v.to_string(),
                 "content-type" => content_type = v.to_string(),
+                "accept-language" => accept_language = v.to_string(),
                 _ => {}
             }
         }
@@ -328,6 +333,7 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> std::io::Result<Option<Req
         host,
         origin,
         content_type,
+        accept_language,
         body: String::from_utf8_lossy(&body).into_owned(),
     }))
 }
@@ -361,11 +367,24 @@ const JSON: &str = "application/json; charset=utf-8";
 // ルーティング
 // ---------------------------------------------------------------------------
 
+/// この応答で使う表示言語。
+///
+/// 設定が `auto` のときだけブラウザの `Accept-Language` を見る。設定を読めない
+/// ときは組込みデフォルト（= `auto`）として扱う — 画面が開けない理由にはしない。
+fn lang_of(paths: &Paths, req: &Request) -> Lang {
+    let tag = req.accept_language.trim();
+    config::load(&paths.config_path)
+        .unwrap_or_else(|_| config::builtin_default())
+        .language
+        .resolve((!tag.is_empty()).then_some(tag))
+}
+
 fn route(req: &Request, paths: &Paths, port: u16) -> (u16, &'static str, String) {
     if let Some(denied) = guard(req, port) {
         return denied;
     }
     let dir = paths.faces_dir.as_path();
+    let lang = lang_of(paths, req);
     match (req.method.as_str(), req.path.as_str()) {
         ("GET", "/") => (200, "text/html; charset=utf-8", INDEX_HTML.to_string()),
         ("GET", "/app.js") => (200, "text/javascript; charset=utf-8", APP_JS.to_string()),
@@ -374,21 +393,21 @@ fn route(req: &Request, paths: &Paths, port: u16) -> (u16, &'static str, String)
         // 本物のエラーが埋もれる。
         ("GET", "/favicon.ico") => (200, "image/svg+xml", FAVICON.to_string()),
 
-        ("GET", "/api/config") => json_result(config_json(paths)),
-        ("POST", "/api/config") => json_result(set_config(paths, &req.body)),
+        ("GET", "/api/config") => json_result(config_json(paths, lang)),
+        ("POST", "/api/config") => json_result(set_config(paths, &req.body, lang)),
 
-        ("GET", "/api/parts") => (200, JSON, parts_json().to_string()),
+        ("GET", "/api/parts") => (200, JSON, parts_json(lang).to_string()),
         ("GET", "/api/saved") => (200, JSON, saved_json(dir).to_string()),
         ("GET", "/api/load") => json_result(load_saved(dir, &req.query)),
 
-        ("POST", "/api/preview") => json_result(preview(&req.body)),
+        ("POST", "/api/preview") => json_result(preview(&req.body, lang)),
         ("POST", "/api/random") => json_result(random(&req.body, &req.query)),
-        ("POST", "/api/save") => json_result(save(dir, &req.body)),
+        ("POST", "/api/save") => json_result(save(dir, &req.body, lang)),
 
         _ => (
             404,
             JSON,
-            json!({"error": format!("{} {} は無い", req.method, req.path)}).to_string(),
+            json!({"error": format!("no such route: {} {}", req.method, req.path)}).to_string(),
         ),
     }
 }
@@ -408,7 +427,7 @@ fn json_result(r: Result<Value, String>) -> (u16, &'static str, String) {
 ///
 /// 画面はキーを 1 つも知らない。ここが返した項目を順に描くだけなので、設定を
 /// 足すときに触るのは core のスキーマだけで済む（`config.rs` のスキーマ節）。
-fn config_json(paths: &Paths) -> Result<Value, String> {
+fn config_json(paths: &Paths, lang: Lang) -> Result<Value, String> {
     let cfg = config::load(&paths.config_path)?;
     let faces = Registry::load_in(&paths.faces_dir);
 
@@ -417,8 +436,8 @@ fn config_json(paths: &Paths) -> Result<Value, String> {
         .map(|f| {
             let mut v = json!({
                 "key": f.key,
-                "label": f.label,
-                "help": f.help,
+                "label": f.label.get(lang),
+                "help": f.help.get(lang),
                 "value": config::field_value(&cfg, f.key),
             });
             let o = v.as_object_mut().expect("json! で作った object");
@@ -429,7 +448,7 @@ fn config_json(paths: &Paths) -> Result<Value, String> {
                         "choices".into(),
                         choices
                             .iter()
-                            .map(|(id, label)| json!({"id": id, "label": label}))
+                            .map(|(id, label)| json!({"id": id, "label": label.get(lang)}))
                             .collect(),
                     );
                 }
@@ -440,7 +459,7 @@ fn config_json(paths: &Paths) -> Result<Value, String> {
                     o.insert("kind".into(), json!("int"));
                     o.insert("min".into(), json!(min));
                     o.insert("max".into(), json!(max));
-                    o.insert("unit".into(), json!(unit));
+                    o.insert("unit".into(), json!(unit.get(lang)));
                 }
                 FieldKind::Face => {
                     o.insert("kind".into(), json!("face"));
@@ -456,13 +475,15 @@ fn config_json(paths: &Paths) -> Result<Value, String> {
     Ok(json!({
         "path": paths.config_path.display().to_string(),
         "fields": fields,
-        "faces": faces_json(&faces),
+        "faces": faces_json(&faces, lang),
+        // 画面はここで初めて自分の言語を知る（`<html lang>` と辞書の切り替えに使う）。
+        "lang": lang.as_str(),
     }))
 }
 
 /// `design` の選択肢。**メニューに並べていたプレビューをそのまま画面へ持ってきた**
 /// もので、絵は daemon が描くのと同じ `face::svg` の出力。
-fn faces_json(faces: &Registry) -> Value {
+fn faces_json(faces: &Registry, lang: Lang) -> Value {
     let builtin: Vec<&str> = ccsessions_core::face::builtin_ids();
     Value::Array(
         faces
@@ -471,7 +492,7 @@ fn faces_json(faces: &Registry) -> Value {
             .map(|f| {
                 json!({
                     "id": f.id,
-                    "label": f.display_label(),
+                    "label": f.display_label(lang),
                     "builtin": builtin.contains(&f.id.as_str()),
                     "svg": svg::render_chip(f, SessionState::Working, Size::Dock),
                 })
@@ -488,9 +509,10 @@ fn faces_json(faces: &Registry) -> Value {
 ///
 /// 値は**すべて文字列**で受ける。`config::set_field` が CLI と同じ検証を掛けるので、
 /// 型ごとの分岐と「画面だけ緩い」検証がここに生えない。
-fn set_config(paths: &Paths, body: &str) -> Result<Value, String> {
-    let v: Value = serde_json::from_str(body).map_err(|e| format!("JSON として読めません: {e}"))?;
-    let key = v["key"].as_str().ok_or("key がありません")?;
+fn set_config(paths: &Paths, body: &str, lang: Lang) -> Result<Value, String> {
+    let v: Value =
+        serde_json::from_str(body).map_err(|e| format!("cannot read the body as JSON: {e}"))?;
+    let key = v["key"].as_str().ok_or("no key in the body")?;
     // 数値・真偽値でそのまま送られてきても受ける（画面側の取り違えで
     // 「保存できない」になるより、素直に文字列化する方が親切）。
     let value = match &v["value"] {
@@ -498,19 +520,25 @@ fn set_config(paths: &Paths, body: &str) -> Result<Value, String> {
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => n.to_string(),
         Value::Null => "auto".to_string(),
-        other => return Err(format!("value が扱えない型です: {other}")),
+        other => return Err(format!("value has a type we cannot use: {other}")),
     };
 
     let mut cfg = config::load(&paths.config_path)?;
     let faces = Registry::load_in(&paths.faces_dir);
     config::set_field(&mut cfg, key, &value, &faces)?;
     config::save(&paths.config_path, &cfg)
-        .map_err(|e| format!("{} に書けません: {e}", paths.config_path.display()))?;
+        .map_err(|e| format!("cannot write {}: {e}", paths.config_path.display()))?;
 
+    // 言語を変えた直後の応答は**変更後の言語**で返る（`lang` は書き込み前に
+    // 決まっているので、正確にはこのトーストだけ 1 回前の言語になる）。画面は
+    // このあと `/api/config` を取り直して全体を張り替えるので、ずれは残らない。
     Ok(json!({
         "key": key,
         "value": config::field_value(&cfg, key),
-        "message": format!("{key} を {value} にした"),
+        "message": match lang {
+            Lang::Ja => format!("{key} を {value} にした"),
+            Lang::En => format!("set {key} to {value}"),
+        },
     }))
 }
 
@@ -522,35 +550,43 @@ fn set_config(paths: &Paths, body: &str) -> Result<Value, String> {
 ///
 /// **パーツを足すときに触るのは `face::builder::parts` の表だけ**で、
 /// ここも JS も触らなくてよい、というのがこの経路の目的。
-fn parts_json() -> Value {
+///
+/// # バリエーションの名前は送らない
+///
+/// パーツ 1 つ 1 つの名前（「ジト目」「もみあげ」…）は**画面に出さない**ので
+/// 送らない。サムネイルがその形そのものなので、名前は情報を足していなかった。
+/// 訳す対象からも外れるため、パーツを足すのに翻訳が要らないという `parts.rs`
+/// の性質が保たれる（[ADR 0025](../../docs/adr/0025-ui-is-bilingual-diagnostics-are-english.md)）。
+/// カテゴリ名はタブの見出しなので送る。
+fn parts_json(lang: Lang) -> Value {
     use ccsessions_core::face::builder::parts;
 
     let mut categories = vec![
         json!({
             "id": "face",
-            "label": "顔のライン",
+            "label": l("顔のライン", "Outline").get(lang),
             "kind": "face",
             "variants": parts::FACES.iter()
-                .map(|p| json!({"id": p.id, "label": p.label}))
+                .map(|p| json!({"id": p.id}))
                 .collect::<Vec<_>>(),
         }),
         json!({
             "id": "eyes",
-            "label": "目",
+            "label": l("目", "Eyes").get(lang),
             "kind": "eyes",
             "variants": parts::EYES.iter()
-                .map(|p| json!({"id": p.id, "label": p.label}))
+                .map(|p| json!({"id": p.id}))
                 .collect::<Vec<_>>(),
         }),
     ];
     for c in parts::LINES {
         categories.push(json!({
             "id": c.id,
-            "label": c.label,
+            "label": c.label.get(lang),
             "kind": "line",
             "on_bar": c.on_bar,
             "variants": c.variants.iter()
-                .map(|p| json!({"id": p.id, "label": p.label}))
+                .map(|p| json!({"id": p.id}))
                 .collect::<Vec<_>>(),
         }));
     }
@@ -559,13 +595,13 @@ fn parts_json() -> Value {
         "version": builder::CONFIG_VERSION,
         "categories": categories,
         "states": SessionState::ORDER.iter()
-            .map(|s| json!({"id": s.as_str(), "label": s.ja(), "glyph": s.glyph()}))
+            .map(|s| json!({"id": s.as_str(), "label": s.label(lang), "glyph": s.glyph()}))
             .collect::<Vec<_>>(),
         "eye_colors": [
-            {"id": EyeColor::Eye.as_str(), "label": "標準（明るい）"},
-            {"id": EyeColor::White.as_str(), "label": "白"},
-            {"id": EyeColor::EyeClosed.as_str(), "label": "くすんだ色"},
-            {"id": EyeColor::EyeError.as_str(), "label": "赤"},
+            {"id": EyeColor::Eye.as_str(), "label": l("標準（明るい）", "Default (bright)").get(lang)},
+            {"id": EyeColor::White.as_str(), "label": l("白", "White").get(lang)},
+            {"id": EyeColor::EyeClosed.as_str(), "label": l("くすんだ色", "Muted").get(lang)},
+            {"id": EyeColor::EyeError.as_str(), "label": l("赤", "Red").get(lang)},
         ],
         "default": CharacterConfig::default(),
     })
@@ -579,7 +615,7 @@ fn parse_config(body: &str) -> Result<CharacterConfig, String> {
     CharacterConfig::from_json(body)
 }
 
-fn preview(body: &str) -> Result<Value, String> {
+fn preview(body: &str, lang: Lang) -> Result<Value, String> {
     let cfg = parse_config(body)?;
     let c = builder::compose(&cfg);
 
@@ -603,7 +639,7 @@ fn preview(body: &str) -> Result<Value, String> {
         "states": SessionState::ORDER.iter()
             .map(|s| json!({
                 "id": s.as_str(),
-                "label": s.ja(),
+                "label": s.label(lang),
                 "svg": svg::render_chip(&c.spec, *s, Size::Dock),
             }))
             .collect::<Vec<_>>(),
@@ -667,20 +703,20 @@ fn random(body: &str, query: &str) -> Result<Value, String> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
     serde_json::to_value(builder::random(seed, &keep))
-        .map_err(|e| format!("設定を JSON にできません: {e}"))
+        .map_err(|e| format!("cannot turn the config into JSON: {e}"))
 }
 
 // ---------------------------------------------------------------------------
 // /api/save · /api/saved · /api/load
 // ---------------------------------------------------------------------------
 
-fn save(dir: &Path, body: &str) -> Result<Value, String> {
+fn save(dir: &Path, body: &str, lang: Lang) -> Result<Value, String> {
     let cfg = parse_config(body)?;
     let id = cfg.id.trim().to_string();
     if !builder::is_saveable_id(&id) {
         return Err(format!(
-            "id {id:?} は使えません。英小文字・数字・ハイフンだけで、\
-             先頭は英数字、32 文字以内にしてください（例: \"my-face\"）"
+            "invalid id {id:?}: use lowercase letters, digits and hyphens only, \
+             start with a letter or digit, 32 characters at most (e.g. \"my-face\")"
         ));
     }
 
@@ -689,7 +725,7 @@ fn save(dir: &Path, body: &str) -> Result<Value, String> {
         // 壊れた顔を顔ディレクトリに置くと、`ccsessionsd` が起動のたびに
         // エラーを吐き続ける。保存の時点で止める。
         return Err(format!(
-            "検証に通っていないので保存しません:\n{}",
+            "not saved — the face does not pass validation:\n{}",
             c.problems
                 .iter()
                 .map(|p| format!("  [{}] {}", p.code, p.message))
@@ -701,15 +737,21 @@ fn save(dir: &Path, body: &str) -> Result<Value, String> {
     // `id` は上で `[a-z0-9-]+` に絞ってあるので、パス区切りは入り得ない。
     let path = dir.join(format!("{id}.toml"));
     ccsessions_core::write_atomic(&path, &c.toml)
-        .map_err(|e| format!("{} に書けません: {e}", path.display()))?;
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
 
     Ok(json!({
         "id": id,
         "path": path.display().to_string(),
-        "message": format!(
-            "{} に保存しました。走っている ccsessionsd が数百 ms で拾います",
-            path.display()
-        ),
+        "message": match lang {
+            Lang::Ja => format!(
+                "{} に保存しました。走っている ccsessionsd が数百 ms で拾います",
+                path.display()
+            ),
+            Lang::En => format!(
+                "saved to {}. A running ccsessionsd picks it up within a few hundred ms",
+                path.display()
+            ),
+        },
     }))
 }
 
@@ -749,21 +791,21 @@ fn saved_json(dir: &Path) -> Value {
 }
 
 fn load_saved(dir: &Path, query: &str) -> Result<Value, String> {
-    let id = param(query, "id").ok_or("id がありません")?;
+    let id = param(query, "id").ok_or("no id given")?;
     if !builder::is_saveable_id(&id) {
-        return Err(format!("id {id:?} は使えません"));
+        return Err(format!("invalid id {id:?}"));
     }
     let path = dir.join(format!("{id}.toml"));
     let text = std::fs::read_to_string(&path)
-        .map_err(|e| format!("{} を読めません: {e}", path.display()))?;
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     let cfg = builder::config_from_toml(&text).ok_or_else(|| {
         format!(
-            "{} はビルダーで作った顔ではないので読み込めません\
-             （手で書いた顔をパーツに戻すことはできません）",
+            "{} was not made in the builder, so it cannot be loaded \
+             (a hand-written face cannot be turned back into parts)",
             path.display()
         )
     })?;
-    serde_json::to_value(cfg).map_err(|e| format!("設定を JSON にできません: {e}"))
+    serde_json::to_value(cfg).map_err(|e| format!("cannot turn the config into JSON: {e}"))
 }
 
 /// `a=1&b=2` から値を 1 つ取り出す（パーセントデコードつき）。
@@ -825,6 +867,7 @@ mod tests {
                 .map(|(_, q)| q.into())
                 .unwrap_or_default(),
             host: format!("127.0.0.1:{PORT}"),
+            accept_language: String::new(),
             origin: if method == "GET" {
                 // 同一オリジンの GET にブラウザは Origin を付けない。
                 String::new()
@@ -1049,7 +1092,7 @@ mod tests {
 
         let (s, body) = get("/api/load?id=hand", dir.path());
         assert_eq!(s, 400);
-        assert!(body.contains("ビルダーで作った顔ではない"), "{body}");
+        assert!(body.contains("was not made in the builder"), "{body}");
     }
 
     // ---- 設定 ---------------------------------------------------------------
@@ -1083,6 +1126,121 @@ mod tests {
         assert_eq!(faces.len(), ccsessions_core::face::builtin_ids().len());
         assert!(faces[0]["svg"].as_str().unwrap().starts_with("<svg "));
         assert_eq!(faces[0]["builtin"], true);
+    }
+
+    /// 設定を `language = "en"` にすると、**スキーマ由来の文言が全部英語で届く**。
+    ///
+    /// 画面は自分で辞書を引かずにこの label / help をそのまま出すので、ここが
+    /// 日本語のままだと言語を切り替えても設定画面だけ日本語で残る。
+    #[test]
+    fn the_schema_is_served_in_the_language_the_settings_ask_for() {
+        let dir = TempDir::new().unwrap();
+        let (s, _) = post(
+            "/api/config",
+            r#"{"key":"language","value":"en"}"#,
+            dir.path(),
+        );
+        assert_eq!(s, 200);
+
+        let (_, body) = get("/api/config", dir.path());
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["lang"], "en", "画面に渡す解決済みの言語");
+
+        let by_key = |key: &str| -> Value {
+            v["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|f| f["key"] == key)
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(by_key("placement")["label"], "Placement");
+        assert_eq!(by_key("placement")["choices"][0]["label"], "Menu bar");
+        assert_eq!(by_key("max_sessions")["unit"], "sessions");
+        assert!(
+            by_key("language")["help"].as_str().unwrap().is_ascii(),
+            "help まで英語になっていること"
+        );
+
+        // 顔の名前も英語側（`faces/*.toml` の label_en）に切り替わる。
+        let egg = v["faces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["id"] == "egg")
+            .cloned()
+            .unwrap();
+        assert_eq!(egg["label"], "Egg");
+    }
+
+    /// `language = "auto"`（既定）ではブラウザの `Accept-Language` に従う。
+    #[test]
+    fn auto_follows_the_browsers_accept_language() {
+        let dir = TempDir::new().unwrap();
+
+        let mut r = req("GET", "/api/config", "");
+        r.accept_language = "en-US,en;q=0.9".into();
+        let (_, body) = send(r, dir.path());
+        assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["lang"], "en");
+
+        let mut r = req("GET", "/api/config", "");
+        r.accept_language = "ja,en-US;q=0.9".into();
+        let (_, body) = send(r, dir.path());
+        assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["lang"], "ja");
+    }
+
+    /// 明示的に選んだ言語は、ブラウザが何と言おうと勝つ。
+    #[test]
+    fn an_explicit_language_beats_the_browser() {
+        let dir = TempDir::new().unwrap();
+        post(
+            "/api/config",
+            r#"{"key":"language","value":"ja"}"#,
+            dir.path(),
+        );
+
+        let mut r = req("GET", "/api/config", "");
+        r.accept_language = "en-US".into();
+        let (_, body) = send(r, dir.path());
+        assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["lang"], "ja");
+    }
+
+    /// パーツの**バリエーション名は送らない**（画面に出さないので）。
+    /// カテゴリ名と状態名は出るので、そちらは言語に従う。
+    #[test]
+    fn part_variants_carry_no_label_but_categories_and_states_do() {
+        let dir = TempDir::new().unwrap();
+        post(
+            "/api/config",
+            r#"{"key":"language","value":"en"}"#,
+            dir.path(),
+        );
+        let (_, body) = get("/api/parts", dir.path());
+        let v: Value = serde_json::from_str(&body).unwrap();
+
+        for c in v["categories"].as_array().unwrap() {
+            assert!(
+                !c["label"].as_str().unwrap().is_empty(),
+                "カテゴリ {} はタブの見出しなので名前が要る",
+                c["id"]
+            );
+            for variant in c["variants"].as_array().unwrap() {
+                assert!(
+                    variant.get("label").is_none(),
+                    "バリエーション {} に label が付いている（画面に出さないので送らない）",
+                    variant["id"]
+                );
+            }
+        }
+        let hair = v["categories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == "hair")
+            .unwrap();
+        assert_eq!(hair["label"], "Hair");
+        assert_eq!(v["states"][0]["label"], "Working");
     }
 
     /// 保存すると**設定ファイルに書かれ**、次に読むとその値が返る

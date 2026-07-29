@@ -51,6 +51,7 @@ use tao::window::{Window, WindowBuilder};
 
 use ccsessions_core::config::{self, BarAlign, Config, Placement};
 use ccsessions_core::face::{FaceSpec, Registry};
+use ccsessions_core::lang::Lang;
 use ccsessions_core::session::{DeadReason, Session};
 use ccsessions_core::store;
 
@@ -184,6 +185,9 @@ struct Overlay {
     faces: Registry,
     face: Arc<FaceSpec>,
     cfg: Config,
+    /// OS の言語タグ（`"ja-JP"` 等）。`language = "auto"` のときだけ使う。
+    /// 起動時に 1 度だけ拾う（毎回 NSLocale を叩く理由が無い）。
+    os_lang_tag: Option<String>,
     packing: Packing,
 
     sessions: Arc<[Session]>,
@@ -266,6 +270,7 @@ impl Overlay {
             faces,
             face,
             cfg,
+            os_lang_tag: ffi::os_language_tag(),
             packing,
             sessions: Arc::from(Vec::new()),
             hovered: None,
@@ -352,6 +357,16 @@ impl Overlay {
         self.rebuild_and_reposition();
     }
 
+    /// ホバーカードに出す文言の言語。
+    ///
+    /// **設定を読み直す必要は無い** — `ConfigChanged` が来るたび `self.cfg` は
+    /// 差し替わり、そのときに `rebuild_and_reposition` が `hide_card` するので、
+    /// 次のホバーでここが呼ばれ直す。OS のタグは起動時に 1 度だけ拾ってある
+    /// （途中で「言語と地域」を変えたなら常駐も入れ直す想定）。
+    fn lang(&self) -> Lang {
+        self.cfg.language.resolve(self.os_lang_tag.as_deref())
+    }
+
     fn on_hover(&mut self, pos: Option<(f64, f64)>) {
         // 背景の濃さは「カーソルが帯の上にあるか」だけで決まり、どの生き物の
         // 上かは関係しない。**当たり判定による早期 return より前**に反映する
@@ -373,9 +388,13 @@ impl Overlay {
         };
 
         let now = ccsessions_core::now_ms();
-        let card =
-            self.flock
-                .build_card(session, now, self.cfg.done_ttl_ms(), self.cfg.reduce_motion);
+        let card = self.flock.build_card(
+            session,
+            now,
+            self.cfg.done_ttl_ms(),
+            self.cfg.reduce_motion,
+            self.lang(),
+        );
         self.show_card(index, card);
         self.hovered = Some(Hovered {
             index,
@@ -762,8 +781,8 @@ fn warn_if_centred_under_the_notch(m: &geometry::ScreenMetrics, cfg: &Config, co
     *last = Some(hidden);
     if hidden {
         eprintln!(
-            "ccsessionsd: 警告 bar_align=center で群れ（幅 {content_w:.1}）がノッチの下に隠れます。\
-             bar_align=auto にすればノッチを避けます。"
+            "ccsessionsd: warning — with bar_align=center the flock (width {content_w:.1}) \
+             hides under the notch. bar_align=auto keeps clear of it."
         );
     }
 }
@@ -865,8 +884,8 @@ fn poll_loop(proxy: EventLoopProxy<AppEvent>, mut cfg: Config, demo: bool) {
 fn sweep_dead_sessions(cfg: &Config) {
     for (s, reason) in store::sweep(ccsessions_core::now_ms(), cfg.session_ttl_ms()) {
         let why = match reason {
-            DeadReason::Expired => format!("{}秒 無更新", cfg.session_ttl_ms() / 1000),
-            DeadReason::ProcessGone(pid) => format!("pid {pid} が居ない"),
+            DeadReason::Expired => format!("no update for {}s", cfg.session_ttl_ms() / 1000),
+            DeadReason::ProcessGone(pid) => format!("pid {pid} is gone"),
         };
         eprintln!(
             "ccsessionsd: reaped session {} ({}) — {}",

@@ -40,6 +40,7 @@
 //! 内側へ来る（`shape::place`）。
 
 use crate::face::builder::shape::{self, Curve};
+use crate::lang::{l, L};
 
 // ---------------------------------------------------------------------------
 // 体の寸法
@@ -494,7 +495,10 @@ const fn none(id: &'static str, label: &'static str) -> LinePart {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LineCategory {
     pub id: &'static str,
-    pub label: &'static str,
+    /// タブの見出しなので画面に出る＝対訳を持つ。**バリエーションの `label` は
+    /// 画面に出さない**（サムネイルがその形そのものなので名前が要らない）ため
+    /// 日本語のまま。
+    pub label: L,
     /// bar（メニューバー）にも描くか。
     ///
     /// **既定で `false` にしてあるカテゴリが多いのは bar の線を間引くため**。bar は
@@ -511,10 +515,10 @@ pub struct LineCategory {
 /// 顔つきの違いが残るから。
 #[rustfmt::skip]
 pub const LINES: &[LineCategory] = &[
-    LineCategory { id: "hair",  label: "髪", on_bar: true,  variants: HAIR },
-    LineCategory { id: "nose",  label: "鼻", on_bar: false, variants: NOSE },
-    LineCategory { id: "mouth", label: "口", on_bar: false, variants: MOUTH },
-    LineCategory { id: "side",  label: "側面", on_bar: false, variants: SIDE },
+    LineCategory { id: "hair",  label: l("髪", "Hair"),  on_bar: true,  variants: HAIR },
+    LineCategory { id: "nose",  label: l("鼻", "Nose"),  on_bar: false, variants: NOSE },
+    LineCategory { id: "mouth", label: l("口", "Mouth"), on_bar: false, variants: MOUTH },
+    LineCategory { id: "side",  label: l("側面", "Sides"), on_bar: false, variants: SIDE },
 ];
 
 /// 髪 30 種。生え際・前髪のラインとして v = 0.62〜0.88 に置く。

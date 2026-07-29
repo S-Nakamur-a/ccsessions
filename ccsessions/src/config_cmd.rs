@@ -16,7 +16,7 @@ pub fn run(args: &[String]) -> i32 {
         Some(other) => {
             eprintln!("ccsessions: config: unknown subcommand: {other}");
             eprintln!("usage: ccsessions config [get|set <key> <value>|path|edit]");
-            eprintln!("（画面から設定するなら `ccsessions ui`）");
+            eprintln!("(use `ccsessions ui` to change settings from a screen)");
             1
         }
     }

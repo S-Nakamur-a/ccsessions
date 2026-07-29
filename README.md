@@ -1,160 +1,178 @@
+**English** | [日本語](README.ja.md)
+
 # ccsessions
 
-Claude Code の走行中セッションを、macOS のメニューバーに生き物の群れとして表示します。
-1 セッション = 1 匹です。色と動きで状態が分かり、ホバーすると詳細が出ます。
+Shows your running Claude Code sessions as a flock of creatures in the macOS menu bar.
+One session = one creature. Color and motion tell you the state, and hovering shows the details.
 
-![作業中・判断待ち・エージェント待ち・アイドル・完了・エラーの 6 状態](docs/assets/states.svg)
+![The six states: working, needs you, agents running, idle, done, error](docs/assets/states.svg)
 
-## インストール
+## Install
 
-macOS のみです。画面収録などの特別な権限は要りません。
+macOS only. No special permissions (screen recording and the like) are required.
 
 ```sh
 brew install S-Nakamur-a/tap/ccsessions
 brew services start ccsessions
 ```
 
-次に Claude Code の中で、状態を送る hook を入れます:
+Next, inside Claude Code, add the hooks that report session state:
 
 ```
 /plugin marketplace add S-Nakamur-a/ccsessions
 /plugin install ccsessions@ccsessions-marketplace
 ```
 
-Claude Code を再起動すれば出ます。うまくいかないときは `ccsessions doctor`
-を実行してください（何が入っていて何が足りないかを教えます）。
+Restart Claude Code and the creatures appear. If something is not working, run
+`ccsessions doctor` — it tells you what is installed and what is missing.
 
-## 設定
+## Settings
 
 ```sh
 ccsessions ui
 ```
 
-ブラウザが開きます。メニューバーか画面下か、生き物の見た目、どれくらいで消えるか等を
-そこで決められます。顔を自分で作れるのもここです。
+A browser opens. Language, menu bar or bottom of the screen, how the creatures look, how
+long they stay — you decide all of that there. Building your own face happens here too.
+
+The settings, the character builder, and the hover card come in English and Japanese, and
+follow your OS language by default. Diagnostics (`ccsessions doctor`) are always English.
 
 <details>
-<summary>設定ファイルを直接書く場合</summary>
+<summary>Editing the config file directly</summary>
 
-`~/.config/ccsessions/config.toml` です。変えた瞬間に走っている常駐が数百 ms で拾います。
+The file is `~/.config/ccsessions/config.toml`. A running daemon picks up your edits within
+a few hundred ms.
 
 ```toml
-placement = "bar"        # "bar"（メニューバー）| "dock"（画面下）
-design = "egg"           # 組込みは "egg" | "round" | "squircle" | "bean"
-                         # 自作の顔の id も書ける
+language = "auto"        # "auto" (follow the OS) | "ja" | "en"
+                         # Applies to the settings, the builder, and the hover
+                         # card. Diagnostics (`ccsessions doctor`) stay English.
+placement = "bar"        # "bar" (menu bar) | "dock" (bottom of the screen)
+design = "egg"           # built-ins are "egg" | "round" | "squircle" | "bean"
+                         # the id of a face you made yourself works too
 reduce_motion = false
-show_glyphs = true       # 状態記号（› ! ⋯ z ✓ ×）を出す
+show_glyphs = true       # show the state glyphs (› ! ⋯ z ✓ ×)
 bar_align = "auto"       # "auto" | "center" | "left-of-notch" | "right-of-notch"
-compact_flock = "auto"   # セッションが増えて入り切らなくなったら群れを縮める
-                         # "auto"（既定）| "always"（常に縮める）| "never"（縮めない）
-done_ttl_secs = 180      # 完了 → アイドルに変わるまで
-session_ttl_secs = 28800 # これだけ無更新なら生き物を消す（保険。下記参照）
+compact_flock = "auto"   # shrink the flock once sessions no longer fit
+                         # "auto" (default) | "always" | "never"
+done_ttl_secs = 180      # how long until done turns into idle
+session_ttl_secs = 28800 # remove a creature after this long without an update
+                         # (a safety net; see below)
 max_sessions = 12
-detect_errors = false    # Stop 時に transcript を見てエラー終了も判定する（補助手段）
+detect_errors = false    # on Stop, also read the transcript to detect an error exit
+                         # (best-effort)
 ```
 
-bar はキーボードフォーカスのある画面のメニューバーに出ます（外部モニタにも追従します）。
-顔を TOML で手書きする場合は [`faces/README.md`](faces/README.md) を参照してください。
+`bar` draws on the menu bar of the screen that has keyboard focus (it follows you onto
+external monitors). To hand-write a face in TOML, see [`faces/README.md`](faces/README.md).
 
 </details>
 
-## 状態
+## States
 
-| 表示 | 状態 | いつ |
+| Display | State | When |
 |---|---|---|
-| `›` シアン・上下に揺れる・瞬きする | 作業中 | プロンプト送信後、Claude が動いています |
-| `!` 琥珀・跳ねる | 判断待ち | 許可要求・通知が出て、あなたの入力を待っています |
-| `⋯` 紫・横に漂う・横目 | エージェント待ち | サブエージェント（Task）が走っています |
-| `z` 灰・静止・薄い | アイドル | 完了して一定時間経過しました |
-| `✓` 緑・静止 | 完了 | ターンが終わった直後です（既定 3 分） |
-| `×` 赤・ゆっくり明滅 | エラー | 直近のターンがエラーで終わりました |
+| `›` cyan, bobs up and down, blinks | Working | Claude is running after you sent a prompt |
+| `!` amber, hops | Needs you | A permission request or notification is waiting for your input |
+| `⋯` purple, drifts sideways, looks aside | Agents running | Subagents (Task) are running |
+| `z` gray, still, faded | Idle | Some time has passed since the turn finished |
+| `✓` green, still | Done | The turn just finished (3 minutes by default) |
+| `×` red, blinks slowly | Error | The last turn ended in an error |
 
-バッジはそのセッションが走らせているエージェントの数です。
+The badge is the number of agents that session is running.
 
-## やめる・消す
+## Stopping and uninstalling
 
-| したいこと | コマンド |
+| What you want | Command |
 |---|---|
-| 常駐を止める | `brew services stop ccsessions` |
-| hook を外す | Claude Code で `/plugin uninstall ccsessions@ccsessions-marketplace` |
-| 丸ごと消す | 上の 2 つ → `brew uninstall ccsessions` |
+| Stop the daemon | `brew services stop ccsessions` |
+| Remove the hooks | In Claude Code, `/plugin uninstall ccsessions@ccsessions-marketplace` |
+| Remove everything | Both of the above, then `brew uninstall ccsessions` |
 
 <details>
-<summary>プラグインを使えない環境</summary>
+<summary>Environments where you cannot use the plugin</summary>
 
-購読しているイベントは `plugins/ccsessions/hooks/hooks.json` にあります（10 個）。
-enterprise の managed settings 等でプラグインを入れられない場合は、これを参考に手で
-`settings.json` へ書いてください。その場合 command は `${CLAUDE_PLUGIN_ROOT}/...` ではなく
-`ccsessions hook` の絶対パスにします。`timeout` を落とさないでください — 省くと Claude Code
-側の既定（多くのイベントで 600 秒）が効き、hook が詰まったときにターンがそのぶん止まります。
+The events we subscribe to are listed in `plugins/ccsessions/hooks/hooks.json` (10 of them).
+If you cannot install plugins — enterprise managed settings, for example — use that file as
+a reference and write them into `settings.json` by hand. In that case the command is the
+absolute path to `ccsessions hook`, not `${CLAUDE_PLUGIN_ROOT}/...`. Do not drop `timeout` —
+without it Claude Code's own default applies (600 seconds for most events), and a stuck hook
+stalls the turn for that long.
 
 </details>
 
 <details>
-<summary>生き物が消えるとき</summary>
+<summary>When a creature disappears</summary>
 
-1. セッションが普通に終わったとき（`SessionEnd` hook）。
-2. セッションのプロセスが居なくなったとき — 強制終了・端末を閉じた・親のツールに
-   殺された等で `SessionEnd` が飛ばなかった場合です。hook が記録した pid の生存を
-   常駐が確かめます。
-3. `session_ttl_secs` のあいだ 1 度も hook が来なかったとき（1・2 で拾えないときの保険）。
+1. When the session ends normally (the `SessionEnd` hook).
+2. When the session's process is gone — it was force-quit, the terminal was closed, a parent
+   tool killed it, and so `SessionEnd` never arrived. The daemon checks whether the pid
+   recorded by the hook is still alive.
+3. When no hook has arrived for `session_ttl_secs` (the safety net for what 1 and 2 miss).
 
-つまり `session_ttl_secs` を長くしても死んだセッションは居座りません。生存確認できない
-ときは必ず「生きている」側に倒します。消したものは `~/Library/Logs/ccsessions/ccsessionsd.log`
-に `reaped session ... — pid 12345 が居ない` の形で残ります。
+So raising `session_ttl_secs` does not let dead sessions linger. Whenever liveness cannot be
+confirmed, we always err on the side of "alive". Anything that is removed is recorded in
+`~/Library/Logs/ccsessions/ccsessionsd.log` in the form `reaped session ... — pid 12345 が居ない`.
 
 </details>
 
 <details>
-<summary>既知の制限</summary>
+<summary>Known limitations</summary>
 
-| 症状 | 原因 | 逃げ方 |
+| Symptom | Cause | Workaround |
 |---|---|---|
-| ターンを中断（ESC）したときに状態が「作業中」のまま残ります | 中断では `Stop` も `StopFailure` も来ません | 次のプロンプトを送れば戻ります |
-| エラー（`×` 赤）がほとんど出ません | API エラーは `StopFailure` で取りますが、それ以外の失敗は hook から見えません | — |
-| ホバーカードのエージェント行に役割ラベルが出ません | `agent_id` と Agent ツールの `description` を突き合わせる手段が payload にありません | — |
-| バッジは 32 個で頭打ちになります | `event.rs` の `MAX_AGENTS` による意図的な上限です | — |
-| `bar_align = "center"` はノッチ機で群れが隠れます | ノッチは画面の水平中央にあるので、中央配置は必ずその下に入ります | 既定の `auto`（ノッチの右→左へ退避します）を使ってください。起動ログと `ccsessions doctor` も警告します |
-| メニューエクストラを増やしても群れの位置が追随しない環境があります | ノッチ右の空き幅は実行時に計測して追随します（最大 10 秒の遅れ）。ただし計測できない環境（非ノッチ機・メニューバー自動非表示・フルスクリーン）では見積もりの 225pt に落ちます | `bar_align` を `left-of-notch` か `center` にしてください |
-| セッションが 20 匹前後を超えると bar に収まりません | 群れの縮小には下限（0.55 倍）があり、そこから先は判読できなくなるので諦めています | `max_sessions` を下げるか、`placement = "dock"` にしてください |
-| enterprise の managed settings に入れた hook は診断で拾えません | 走査するのはユーザ全体・プロジェクト・ローカルの settings ファイルだけです | そこに入れた場合は `doctor` の「NOT installed」を無視して構いません |
-| プラグイン経由の hook は「有効になっていること」までしか分かりません | プラグインが配る hook は `settings.json` の `hooks` に現れません。`doctor` が見られるのは `enabledPlugins` だけです | イベント単位で確かめたいときは `plugins/ccsessions/hooks/hooks.json` を直接見てください |
+| The state stays "working" after you interrupt a turn with ESC | An interrupt sends neither `Stop` nor `StopFailure` | Send the next prompt and it recovers |
+| Errors (red `×`) almost never show up | API errors are caught via `StopFailure`, but other failures are invisible to hooks | — |
+| The agent rows on the hover card have no role labels | The payload gives us no way to match `agent_id` against the Agent tool's `description` | — |
+| The badge tops out at 32 | A deliberate limit — `MAX_AGENTS` in `event.rs` | — |
+| `bar_align = "center"` hides the flock on notched Macs | The notch sits at the horizontal center of the screen, so a centered flock always ends up underneath it | Use the default `auto`, which moves the flock to the right of the notch, then to the left. The startup log and `ccsessions doctor` warn about this as well |
+| In some environments the flock does not follow along when you add menu extras | The free width to the right of the notch is measured at runtime and followed (up to a 10 second delay). Where it cannot be measured — Macs without a notch, an auto-hiding menu bar, full screen — it falls back to an estimated 225pt | Set `bar_align` to `left-of-notch` or `center` |
+| Past roughly 20 sessions the flock no longer fits in the bar | Shrinking the flock has a floor (0.55×), and past that the creatures stop being legible, so we give up | Lower `max_sessions`, or use `placement = "dock"` |
+| Hooks placed in enterprise managed settings are not picked up by the diagnostics | Only the user-wide, project, and local settings files are scanned | If that is where yours live, feel free to ignore `doctor`'s "NOT installed" |
+| For hooks installed via the plugin, all you learn is that they are enabled | Hooks shipped by a plugin do not appear under `hooks` in `settings.json`. All `doctor` can see is `enabledPlugins` | To check event by event, read `plugins/ccsessions/hooks/hooks.json` directly |
 
 </details>
 
 ## CLI
 
 ```sh
-ccsessions list [--json]        # 生きているセッションの一覧
-ccsessions ui                   # 設定 + 顔作りの Web UI
-ccsessions config get|set|path  # 設定の表示・変更（UI と同じ検証を通る）
-ccsessions doctor               # 診断
-ccsessions face list|render     # 顔の一覧・SVG プレビュー
-ccsessions hook                 # Claude Code の hook が呼ぶ（stdin から JSON）
+ccsessions list [--json]        # list the live sessions
+ccsessions ui                   # web UI for settings + face building
+ccsessions config get|set|path  # show/change settings (same validation as the UI)
+ccsessions doctor               # diagnostics
+ccsessions face list|render     # list faces, render an SVG preview
+ccsessions hook                 # called by Claude Code's hooks (JSON on stdin)
 ```
 
-## 開発
+## Development
 
 ```sh
-make check   # fmt --check + clippy -D warnings + test（コミット前の品質ゲート）
-make dev     # 走行中の常駐を止めて build → dev バイナリを起動（install 不要）
-make demo    # 6 状態のダミーセッションで見た目を確認（実セッション不要）
-make help    # ターゲット一覧
+make check   # fmt --check + clippy -D warnings + test (the pre-commit quality gate)
+make dev     # stop the running daemon, build, then launch the dev binary (no install needed)
+make demo    # check the look with dummy sessions in all 6 states (no real sessions needed)
+make help    # list the targets
 ```
 
-前提は [rustup](https://rustup.rs/) の Rust ツールチェイン（MSRV 1.89）です。
-`make install` で `~/.cargo/bin` へ入れ、`make start` で常駐します。
-`brew services` と両方で常駐させると生き物が二重に出るので、どちらか一方にしてください
-（`ccsessions doctor` が検出します）。hook は開発中もプラグインで入れます —
-チェックアウトをそのまま marketplace として使えるので、`/plugin marketplace add .`
-→ `/plugin install ccsessions@ccsessions-marketplace` としてください。
+You need the Rust toolchain from [rustup](https://rustup.rs/) (MSRV 1.89).
+`make install` puts it in `~/.cargo/bin`, and `make start` runs the daemon.
+Running it under `brew services` and by hand at the same time shows every creature twice, so
+pick one (`ccsessions doctor` detects this). Hooks go in via the plugin during development
+too — a checkout works as a marketplace as is, so run `/plugin marketplace add .` and then
+`/plugin install ccsessions@ccsessions-marketplace`.
 
-- [`docs/how-it-works.md`](docs/how-it-works.md) — hook からオーバーレイまでの流れ、
-  購読しているイベント、なぜ CALayer 直描きなのか
-- [`docs/invariants.md`](docs/invariants.md) — 崩してはいけない不変条件
-- [`docs/adr/`](docs/adr/README.md) — なぜ他の案を採らなかったのか
-- [`faces/README.md`](faces/README.md) — 顔（生き物のデザイン）の作り方。Rust は要りません
+When you edit the README, update both languages: this file and
+[`README.ja.md`](README.ja.md).
 
-## ライセンス
+- [`docs/how-it-works.md`](docs/how-it-works.md) — the path from hook to overlay, the events
+  we subscribe to, and why we draw CALayers directly
+- [`docs/invariants.md`](docs/invariants.md) — invariants that must not be broken
+- [`docs/adr/`](docs/adr/README.md) — why the alternatives were not taken
+- [`faces/README.md`](faces/README.md) — how to make a face (the creature's design). No Rust
+  required
+
+These documents are currently written in Japanese only.
+
+## License
 
 [MIT](LICENSE)

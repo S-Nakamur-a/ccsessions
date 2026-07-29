@@ -32,3 +32,4 @@
 | [0022](0022-zombie-is-not-alive.md) | ゾンビプロセスは「死んでいる」と判定する（0008 の続き） |
 | [0023](0023-session-title-from-transcript.md) | セッションタイトルは transcript から読む |
 | [0024](0024-stop-is-not-the-end-of-subagents.md) | `Stop` はサブエージェントの終わりを意味しない（0005 の続き） |
+| [0025](0025-ui-is-bilingual-diagnostics-are-english.md) | 画面の文言は日英、診断は英語。顔パーツ名は出さない |

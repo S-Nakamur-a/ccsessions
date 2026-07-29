@@ -16,6 +16,7 @@
 
 use crate::face::palette::{self, Rgb};
 use crate::face::{outline, seg_to, Corners, Outline, Seg, Size};
+use crate::lang::Lang;
 use crate::session::SessionState;
 
 // ---------------------------------------------------------------------------
@@ -479,9 +480,16 @@ impl FaceSpec {
             .collect()
     }
 
-    /// メニューやギャラリーに出す表示名。
-    pub fn display_label(&self) -> &str {
-        &self.label
+    /// ギャラリーに出す表示名。
+    ///
+    /// 英語のときは `label_en`（`faces/*.toml` の任意フィールド）を使う。
+    /// **無ければ `label` に落ちる** — ビルダーが書き出す顔には `label_en` が
+    /// 無く、ユーザが付けた名前を勝手に訳すこともできないため。
+    pub fn display_label(&self, lang: Lang) -> &str {
+        match lang {
+            Lang::En => self.label_en.as_deref().unwrap_or(&self.label),
+            Lang::Ja => &self.label,
+        }
     }
 }
 

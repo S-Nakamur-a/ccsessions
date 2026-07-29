@@ -46,45 +46,46 @@ fn run(args: &[String]) -> i32 {
 
 fn print_help() {
     println!(
-        r#"ccsessions — Session Creatures の hook producer / CLI
+        r#"ccsessions — the hook producer / CLI behind the session creatures
 
 USAGE:
     ccsessions hook [--event <name>] [--record <dir>]
-        stdin から Claude Code の hook payload (JSON) を読み、セッション状態を更新する。
-        必ず exit 0 で終わり、stdout には何も書かない。
-        --record <dir> を渡すと、受け取った payload をパース成否に関わらず
-        <dir> にそのまま収録する（開発用。0700/0600 で作成）。
+        Read a Claude Code hook payload (JSON) from stdin and update the session
+        state. Always exits 0 and writes nothing to stdout.
+        With --record <dir>, every payload received is recorded verbatim into
+        <dir> whether or not it parses (for development; created 0700/0600).
 
     ccsessions list [--json]
-        生きているセッションを一覧表示する。
+        List the live sessions.
 
     ccsessions set --session <id> --state <state> [--cwd <cwd>]
-        セッション状態を直接書き換える（デバッグ／外部 producer 用）。
-        <state> は working, wait_user, wait_agent, idle, done, error のいずれか。
+        Overwrite a session's state directly (for debugging / external producers).
+        <state> is one of working, wait_user, wait_agent, idle, done, error.
 
     ccsessions ui [--port <n>] [--faces-dir <path>] [--config <path>] [--no-open]
-        設定とキャラクタービルダーの Web UI を 127.0.0.1 に立てる（`make config`）。
-        既定のポートは 8787。設定は保存した瞬間に走っている ccsessionsd が拾い、
-        顔は ~/.config/ccsessions/faces/<id>.toml として保存される。
+        Serve the settings and character-builder web UI on 127.0.0.1 (`make config`).
+        Port 8787 by default. A running ccsessionsd picks settings up the moment
+        they are saved; faces are written to ~/.config/ccsessions/faces/<id>.toml.
 
     ccsessions config [get|set <key> <value>|path|edit]
-        設定の表示・変更（画面から設定するなら ccsessions ui）。
-        既定は get（現在の設定を TOML で表示）。
+        Show or change the settings (use `ccsessions ui` for a screen).
+        Defaults to get, which prints the current settings as TOML.
 
     ccsessions face [list|check <id|path>|render <id>|gallery]
-        顔（生き物のデザイン）を一覧・検証・プレビューする。
-        render は SVG を、gallery は全顔 × 全状態の HTML を stdout に書く。
-        顔は faces/*.toml と ~/.config/ccsessions/faces/*.toml から読む。
+        List, validate, and preview faces (the creature designs).
+        render writes an SVG to stdout; gallery writes HTML of every face in
+        every state. Faces are read from faces/*.toml and
+        ~/.config/ccsessions/faces/*.toml.
 
     ccsessions doctor
-        設定・状態ディレクトリ・hook 導入状況を診断表示する。
+        Diagnose the settings, the state directory, and how the hooks are wired.
 
     ccsessions help
-        このメッセージを表示する。
+        Show this message.
 
-HOOK の入れ方:
-    Claude Code の中で次を実行する。ccsessions は settings.json を書き換えない
-    （配線するのはプラグインで、入るのは enabledPlugins の 1 行だけ）。
+INSTALLING THE HOOKS:
+    Run this inside Claude Code. ccsessions never edits settings.json itself —
+    the plugin does the wiring, and all that lands there is one enabledPlugins line.
 
         /plugin marketplace add S-Nakamur-a/ccsessions
         /plugin install ccsessions@ccsessions-marketplace

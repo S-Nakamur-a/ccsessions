@@ -31,14 +31,14 @@ fn registry() -> Registry {
 
 fn cmd_list() -> i32 {
     let reg = registry();
-    println!("{:<12} {:<16} {:<10} 作者", "ID", "名前", "出どころ");
+    println!("{:<12} {:<16} {:<10} AUTHOR", "ID", "NAME", "SOURCE");
     for f in reg.all() {
         let src = match &f.source {
-            Source::Builtin => "組込み".to_string(),
+            Source::Builtin => "built-in".to_string(),
             Source::User(p) => p
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| "ユーザ".to_string()),
+                .unwrap_or_else(|| "user".to_string()),
         };
         println!(
             "{:<12} {:<16} {:<10} {}",
@@ -93,15 +93,15 @@ fn cmd_check(args: &[String]) -> i32 {
                     }
                 }
                 Err(e) => {
-                    eprintln!("ccsessions: face: {} を読めません: {e}", p.display());
+                    eprintln!("ccsessions: face: cannot read {}: {e}", p.display());
                     1
                 }
             };
         }
         // パスでなければ id として引く。
         let Some(face) = reg.get(arg) else {
-            eprintln!("ccsessions: face: {arg:?} という顔もファイルもありません");
-            eprintln!("使える顔: {}", reg.ids().join(", "));
+            eprintln!("ccsessions: face: no face and no file called {arg:?}");
+            eprintln!("available faces: {}", reg.ids().join(", "));
             return 1;
         };
         return if report_one(face, &face.id.clone()) {
@@ -163,12 +163,12 @@ fn cmd_render(args: &[String]) -> i32 {
         match args[i].as_str() {
             "--state" => {
                 let Some(v) = need(i) else {
-                    eprintln!("ccsessions: face: --state に値がありません");
+                    eprintln!("ccsessions: face: --state needs a value");
                     return 1;
                 };
                 let Some(s) = SessionState::from_str(v) else {
                     eprintln!(
-                        "ccsessions: face: 未知の状態 {v:?}（working, wait_user, wait_agent, idle, done, error）"
+                        "ccsessions: face: unknown state {v:?} (working, wait_user, wait_agent, idle, done, error)"
                     );
                     return 1;
                 };
@@ -177,21 +177,21 @@ fn cmd_render(args: &[String]) -> i32 {
             }
             "--size" => {
                 let Some(v) = need(i) else {
-                    eprintln!("ccsessions: face: --size に値がありません");
+                    eprintln!("ccsessions: face: --size needs a value");
                     return 1;
                 };
                 size = match v.as_str() {
                     "bar" => Size::Bar,
                     "dock" => Size::Dock,
                     other => {
-                        eprintln!("ccsessions: face: 未知の配置 {other:?}（bar か dock）");
+                        eprintln!("ccsessions: face: unknown size {other:?} (bar or dock)");
                         return 1;
                     }
                 };
                 i += 2;
             }
             other => {
-                eprintln!("ccsessions: face: 未知の引数 {other:?}");
+                eprintln!("ccsessions: face: unknown argument {other:?}");
                 return 1;
             }
         }
@@ -199,8 +199,8 @@ fn cmd_render(args: &[String]) -> i32 {
 
     let reg = registry();
     let Some(face) = reg.get(id) else {
-        eprintln!("ccsessions: face: {id:?} という顔がありません");
-        eprintln!("使える顔: {}", reg.ids().join(", "));
+        eprintln!("ccsessions: face: no face called {id:?}");
+        eprintln!("available faces: {}", reg.ids().join(", "));
         return 1;
     };
     print!("{}", svg::render(face, state, size));

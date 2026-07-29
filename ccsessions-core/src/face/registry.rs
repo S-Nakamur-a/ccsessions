@@ -57,7 +57,7 @@ impl Registry {
                             format!("faces/{id}.toml"),
                             vec![Problem::new(
                                 ProblemCode::Id,
-                                format!("ファイル名 {id}.toml と id {:?} が一致しません", face.id),
+                                format!("filename {id}.toml does not match id {:?}", face.id),
                             )],
                         ));
                     }
@@ -86,7 +86,7 @@ impl Registry {
                             vec![Problem::new(
                                 ProblemCode::Id,
                                 format!(
-                                    "id {:?} は既にある顔と重複しています。別の id にしてください",
+                                    "id {:?} duplicates an existing face. Choose a different id",
                                     face.id
                                 ),
                             )],
@@ -116,14 +116,14 @@ impl Registry {
             return Arc::clone(f);
         }
         eprintln!(
-            "ccsessions: 顔 {id:?} が見つかりません。{DEFAULT_FACE_ID} を使います\
-             （使える顔: {}）",
+            "ccsessions: face {id:?} not found. Falling back to {DEFAULT_FACE_ID} \
+             (available faces: {})",
             self.ids().join(", ")
         );
         self.get(DEFAULT_FACE_ID)
             .or_else(|| self.faces.first())
             .cloned()
-            .expect("組込み顔が 1 つも読めていない（every_builtin_face_parses を参照）")
+            .expect("no builtin face could be loaded (see every_builtin_face_parses)")
     }
 
     /// 顔が 1 つも無いか。`resolve` が `expect` で落ちる条件でもある。
@@ -147,7 +147,7 @@ impl Registry {
     /// 読み込めなかった顔を stderr に列挙する。**戻り値は問題があったかどうか**。
     pub fn report_problems(&self) -> bool {
         for (label, ps) in &self.problems {
-            eprintln!("ccsessions: 顔 {label} を読み込めませんでした:");
+            eprintln!("ccsessions: failed to load face {label}:");
             for p in ps {
                 eprintln!("  {p}");
             }
