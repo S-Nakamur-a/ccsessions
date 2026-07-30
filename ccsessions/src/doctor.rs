@@ -20,12 +20,21 @@ pub fn run() -> i32 {
     let cfg_path = ccsessions_core::config_path();
     let state_dir = state_dir();
     let cfg = config::load(&cfg_path).unwrap_or_else(|_| config::builtin_default());
-    let live = store::list_live(now_ms(), cfg.session_ttl_ms(), cfg.max_sessions);
+    let live = store::list_live(
+        now_ms(),
+        cfg.session_ttl_ms(),
+        cfg.max_sessions,
+        &cfg.ignore,
+    );
     // ディスクに残っているファイル数との差 ＝ まだ掃除されていない死んだセッション。
     // 「一覧に出ないのにファイルがある」を目で確かめられるようにしておく
     // （掃除するのは常駐している ccsessionsd の役目なので、差が減らないままなら
     //  daemon が動いていないというサインになる）。
-    let stale = store::list().len().saturating_sub(live.len());
+    //
+    // 引くのは `live.shown.len()` ではなく `live.total`。表示から外れた理由
+    // （ignore・`max_sessions`）はどちらも生死の判断ではないので、引くと生きて
+    // いるセッションを死骸に数えてしまう。
+    let stale = store::list().len().saturating_sub(live.total);
 
     // Claude Code の設定は複数ファイルに分かれて同居しうる（ユーザ全体・
     // プロジェクト・ローカル）。1 ファイルだけ見ると、hook を別のファイルに
@@ -71,10 +80,20 @@ pub fn run() -> i32 {
         state_dir.display(),
         exists_label(state_dir.exists())
     );
-    println!("live sessions:   {}", live.len());
+    println!("live sessions:   {}", live.shown.len());
     if stale > 0 {
         println!(
             "stale entries:   {stale} (removed by the next sweep — within a minute if ccsessionsd is running)"
+        );
+    }
+    if live.ignored > 0 {
+        // 各条件を `"` で囲む。生のままコンマ区切りで並べると、条件自身に
+        // コンマを含む場合（`/work/a,b` 等）に何件あるか読めなくなる。
+        let conditions: Vec<String> = cfg.ignore.raw().map(|s| format!("{s:?}")).collect();
+        println!(
+            "ignored:         {} hidden by ignore (rules: {})",
+            live.ignored,
+            conditions.join(", ")
         );
     }
     println!("placement:       {}", cfg.placement.as_str());

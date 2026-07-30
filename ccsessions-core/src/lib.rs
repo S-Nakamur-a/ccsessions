@@ -2,13 +2,15 @@
 //!
 //! セッション状態モデル（`session`）・ファイルストア（`store`）・設定（`config`）・
 //! hook payload から状態遷移を決める reducer（`event`）・transcript のエラー判定
-//! （`transcript`）・プロセスの生存確認（`process`）・顔（生き物のデザイン）の
-//! 共通データ型（`face`）・画面に出す文言の対訳（`lang`）を提供する。
+//! （`transcript`）・プロセスの生存確認（`process`）・一覧から外す条件
+//! （`ignore`）・顔（生き物のデザイン）の共通データ型（`face`）・画面に出す文言の
+//! 対訳（`lang`）を提供する。
 //! `ccsessions`（CLI/hook producer）と `ccsessionsd`（常駐オーバーレイ）の両方から使われる。
 
 pub mod config;
 pub mod event;
 pub mod face;
+pub mod ignore;
 pub mod lang;
 mod lock;
 pub mod process;

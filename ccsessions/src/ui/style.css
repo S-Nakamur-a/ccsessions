@@ -176,6 +176,20 @@ section {
 .num .unit, .num .coord-value { font-size: 11px; color: var(--dim); }
 .num button { padding: 3px 9px; font-size: 11px; }
 
+.lines textarea {
+  width: 100%;
+  min-height: 5em;
+  padding: 8px;
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: inherit;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  resize: vertical;
+}
+.lines textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
 /* 顔の選択。プレビューはメニューに並べていたものをそのまま持ってきた。 */
 #face-picker {
   display: grid;

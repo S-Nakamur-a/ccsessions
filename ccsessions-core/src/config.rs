@@ -10,6 +10,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::ignore::IgnoreRules;
 use crate::lang::{self, l, Lang, L};
 use crate::write_atomic;
 
@@ -222,6 +223,8 @@ pub struct Config {
     session_ttl_ms: u64,
     pub max_sessions: usize,
     pub detect_errors: bool,
+    /// 一覧に出さないセッションの条件（書き方と設計は `ignore` モジュールの doc）。
+    pub ignore: IgnoreRules,
 }
 
 impl Config {
@@ -295,6 +298,7 @@ pub fn builtin_default() -> Config {
         session_ttl_ms: DEFAULT_SESSION_TTL_SECS * 1000,
         max_sessions: DEFAULT_MAX_SESSIONS,
         detect_errors: DEFAULT_DETECT_ERRORS,
+        ignore: IgnoreRules::default(),
     }
 }
 
@@ -363,6 +367,25 @@ detect_errors = {detect_errors}
         max_sessions = c.max_sessions,
         detect_errors = c.detect_errors,
     );
+    // 1 件も無いときは、書き方の例をコメントで置く。既定値が「無い」なので行ごと
+    // 消すと、設定ファイルからこの機能の存在自体が読み取れなくなる（下の dock の
+    // 位置と違い、GUI を触っていて偶然見つかる導線が無い）。
+    if c.ignore.is_empty() {
+        out.push_str(
+            "\n# Sessions to keep out of the list. With no wildcard: that path and everything\n\
+             # below it (`~` allowed). Globs work too (`*` and `?` stay within one path\n\
+             # segment, `**` crosses them).\n\
+             # ignore = [\"~/work/tmp\", \"**/cron-jobs/**\"]\n",
+        );
+    } else {
+        out.push_str(
+            "\n# Sessions to keep out of the list (a display filter; no data is removed).\nignore = [\n",
+        );
+        for p in c.ignore.raw() {
+            out.push_str(&format!("  \"{}\",\n", toml_escape(p)));
+        }
+        out.push_str("]\n");
+    }
     // dock の位置は**ドラッグして動かしたときだけ**現れる行にする。既定のままなら
     // 行ごと出さないので、設定ファイルを開けば「まだ動かしていない」ことがそのまま
     // 読み取れる。
@@ -380,6 +403,32 @@ detect_errors = {detect_errors}
         }
         if let Some(y) = c.dock_y {
             out.push_str(&format!("dock_y = {y:?}\n"));
+        }
+    }
+    out
+}
+
+/// TOML の基本文字列（`"..."`）として安全な形に直す。
+///
+/// `render_toml` は値を素で埋めるので、**任意の文字列を受けるフィールド
+/// （`ignore` が最初）はここを通さないと、書き出した設定ファイルを自分で
+/// 読み戻せなくなる。** 壊れ方が静かなのがたちが悪く、保存は成功し、次の起動で
+/// `load` が `Err` を返して既定へ落ちる ＝ ユーザには「設定が全部飛んだ」に見える。
+fn toml_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            // 残りの制御文字も全部逃がす。TOML の基本文字列が生では許さないのは
+            // U+0000–U+0008 / U+000B / U+000C / U+000E–U+001F / U+007F で、
+            // 上の 3 つを塞いだだけでは ESC（U+001B）が漏れる — 色付き出力から
+            // パスをコピーすると実際に混ざる。
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
         }
     }
     out
@@ -418,6 +467,12 @@ pub enum FieldKind {
     Face,
     /// dock の座標（pt）。`"auto"` で既定配置へ戻す。
     Coord,
+    /// 1 行 1 件の文字列の並び。UI は複数行の入力欄を出し、値は改行区切りの
+    /// 1 つの文字列として受け渡す（「値はすべて文字列」という約束を崩さないため）。
+    /// `placeholder` は入力欄が空のときに出す書き方の例。
+    Lines {
+        placeholder: &'static str,
+    },
 }
 
 /// 設定 1 項目の説明。
@@ -579,6 +634,22 @@ static FIELDS: &[FieldSpec] = &[
             ),
         },
         FieldSpec {
+            key: "ignore",
+            label: l("一覧に出さない", "Keep out of the list"),
+            kind: FieldKind::Lines {
+                placeholder: "~/work/tmp\n**/cron-jobs/**",
+            },
+            help: l(
+                "1 行 1 件、当てる相手は作業ディレクトリ。ワイルドカード無しなら\
+                 そのパスと配下すべて（`~` 可）、`*` `?` `**` で glob。表示から外すだけで、\
+                 セッションは消えない（`ccsessions list --all` で見える）。",
+                "One rule per line, matched against the working directory. With no wildcard, \
+                 a path matches itself and everything below it (`~` allowed); `*` `?` `**` are \
+                 globs. This only hides them — nothing is deleted (`ccsessions list --all` \
+                 shows them).",
+            ),
+        },
+        FieldSpec {
             key: "dock_x",
             label: l("dock の x（中心）", "Dock x (centre)"),
             kind: FieldKind::Coord,
@@ -619,6 +690,8 @@ pub fn field_value(cfg: &Config, key: &str) -> Option<String> {
         "session_ttl_secs" => cfg.session_ttl_secs().to_string(),
         "max_sessions" => cfg.max_sessions.to_string(),
         "detect_errors" => cfg.detect_errors.to_string(),
+        // 原文を返す（`IgnorePattern` の doc — 展開後を返すと保存のたびに化ける）。
+        "ignore" => cfg.ignore.raw().collect::<Vec<_>>().join("\n"),
         "dock_x" => coord_to_string(cfg.dock_x),
         "dock_y" => coord_to_string(cfg.dock_y),
         _ => return None,
@@ -685,6 +758,8 @@ pub fn set_field(
         "session_ttl_secs" => cfg.set_session_ttl_secs(parse_int(key, value)?),
         "max_sessions" => cfg.max_sessions = parse_int(key, value)? as usize,
         "detect_errors" => cfg.detect_errors = parse_bool(value)?,
+        // 上の `design` と同じ判断で、1 件でも壊れていたら書かない（`parse_ignore`）。
+        "ignore" => cfg.ignore = parse_ignore(value)?,
         // dock をドラッグして決めた位置。**`auto` で既定へ戻せる口を必ず残す** —
         // さもないと一度動かしたら、設定ファイルを手で編集する以外に画面下部中央へ
         // 戻す手段が無くなる。
@@ -725,6 +800,26 @@ fn parse_int(key: &str, v: &str) -> Result<u64, String> {
         }
     }
     Ok(n)
+}
+
+/// 1 行 1 件の ignore 条件。空行は捨てる（入力欄の末尾の改行で叱らない）。
+///
+/// **1 件でも読めなければ何も書かずに `Err`。** 設定ファイルの読み込み側が
+/// 壊れた行だけ捨てるのは他の設定を巻き添えにしないためだが、ここは人が今まさに
+/// 打った指示なので、黙って一部を捨てるより即座に教える方が親切。どれが悪いのか
+/// 分かるよう、理由は全部並べて返す（1 つ直すたびに保存し直させない）。
+fn parse_ignore(value: &str) -> Result<IgnoreRules, String> {
+    let lines: Vec<&str> = value
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let (rules, errors) = IgnoreRules::parse_lines(&lines);
+    if errors.is_empty() {
+        Ok(rules)
+    } else {
+        Err(errors.join("\n"))
+    }
 }
 
 /// dock の座標（pt）。`"auto"` は「保存された位置を捨てて既定へ戻す」。
@@ -780,6 +875,9 @@ struct RawConfig {
     max_sessions: usize,
     #[serde(default = "default_detect_errors")]
     detect_errors: bool,
+    /// 省略可能（書いていない既存の設定ファイルは空 ＝ 今までどおり全件表示）。
+    #[serde(default)]
+    ignore: Vec<String>,
 }
 
 fn default_language() -> String {
@@ -862,6 +960,13 @@ fn validate_and_build(raw: &RawConfig) -> Result<Config, String> {
         )
     })?;
 
+    // 壊れた条件は `Err` にせず、その行だけ捨てて警告する
+    // （`IgnoreRules::parse_lines_in`）。stderr なので hook の規律は崩れない。
+    let (ignore, ignore_errors) = IgnoreRules::parse_lines(&raw.ignore);
+    for e in &ignore_errors {
+        eprintln!("ccsessions: warning: {e} (this rule is ignored)");
+    }
+
     Ok(Config {
         language,
         placement,
@@ -876,6 +981,7 @@ fn validate_and_build(raw: &RawConfig) -> Result<Config, String> {
         session_ttl_ms: raw.session_ttl_secs.saturating_mul(1000),
         max_sessions: raw.max_sessions,
         detect_errors: raw.detect_errors,
+        ignore,
     })
 }
 
@@ -914,6 +1020,10 @@ mod tests {
         assert!(
             !cfg.detect_errors,
             "エラー検出は StopFailure に一本化したので既定は false"
+        );
+        assert!(
+            cfg.ignore.is_empty(),
+            "既定では 1 件も隠さない（設定しなければ全件出る）"
         );
     }
 
@@ -1070,10 +1180,118 @@ detect_errors = true
         // なって TOML 上は整数になるので、書式の取り違えをここで捕まえる。
         cfg.dock_x = Some(687.25);
         cfg.dock_y = Some(20.0);
+        cfg.ignore = parse_ignore("~/work/tmp\n**/cron-jobs/**").unwrap();
 
         save(&p, &cfg).unwrap();
         let loaded = load(&p).unwrap();
         assert_eq!(loaded, cfg);
+    }
+
+    // ---- ignore ------------------------------------------------------------------------
+
+    /// **後方互換の番人**: `ignore` を書いていない既存の設定ファイルは空 ＝
+    /// 今までどおり全件表示。
+    #[test]
+    fn a_config_without_ignore_shows_everything() {
+        let dir = TempDir::new().unwrap();
+        let p = write_config(&dir, "placement = \"bar\"\nmax_sessions = 12\n");
+        assert!(load(&p).unwrap().ignore.is_empty());
+    }
+
+    /// `ignore` は任意の文字列を受ける最初のフィールドで、`toml_escape` を
+    /// 通し忘れると「保存は成功し、次の起動で設定が全部飛ぶ」形で静かに壊れる。
+    #[test]
+    fn a_pattern_containing_quotes_survives_a_save_and_load_round_trip() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("config.toml");
+        let mut cfg = builtin_default();
+        cfg.ignore = parse_ignore("/tmp/a\"b\n/tmp/c\\d\n/tmp/*\"*").unwrap();
+
+        save(&p, &cfg).unwrap();
+        let loaded = load(&p).unwrap_or_else(|e| panic!("書き出した TOML を読み戻せない: {e}"));
+        assert_eq!(loaded.ignore, cfg.ignore);
+        assert_eq!(
+            loaded.ignore.raw().collect::<Vec<_>>(),
+            vec!["/tmp/a\"b", "/tmp/c\\d", "/tmp/*\"*"]
+        );
+    }
+
+    /// 打ち間違い 1 つで他の設定まで既定へ落とさないための番人。
+    #[test]
+    fn a_broken_ignore_entry_is_dropped_without_failing_the_load() {
+        let dir = TempDir::new().unwrap();
+        let p = write_config(
+            &dir,
+            "placement = \"dock\"\nignore = [\"~alice/x\", \"/a/foo\", \"\"]\n",
+        );
+        let cfg = load(&p).expect("壊れた条件 1 つで設定ごと落としてはいけない");
+        assert_eq!(cfg.placement, Placement::Dock, "他の設定は生きていること");
+        assert_eq!(cfg.ignore.len(), 1);
+        assert_eq!(cfg.ignore.raw().collect::<Vec<_>>(), vec!["/a/foo"]);
+    }
+
+    /// 一方こちらは人が今まさに打った指示。黙って一部だけ捨てると
+    /// 「保存したのに効かない条件」ができる。
+    #[test]
+    fn set_field_refuses_the_whole_ignore_list_if_any_line_is_broken() {
+        let mut cfg = builtin_default();
+        let err = set_field(&mut cfg, "ignore", "/a/foo\n~alice/x", &faces()).unwrap_err();
+        assert!(err.contains('~'), "どの条件が悪いか分からない: {err}");
+        assert!(cfg.ignore.is_empty(), "拒否したのに書き換わっている");
+    }
+
+    /// 空行と前後の空白は捨てる（入力欄の末尾の改行で叱らない）。
+    #[test]
+    fn blank_lines_in_the_ignore_list_are_ignored() {
+        let mut cfg = builtin_default();
+        set_field(&mut cfg, "ignore", "\n  /a/foo  \n\n\n", &faces()).unwrap();
+        assert_eq!(cfg.ignore.raw().collect::<Vec<_>>(), vec!["/a/foo"]);
+        // 空にすれば全件表示へ戻せる（戻す口が消えない番人）。
+        set_field(&mut cfg, "ignore", "", &faces()).unwrap();
+        assert!(cfg.ignore.is_empty());
+    }
+
+    /// 条件が無いときは、書き方の例をコメントで置く。既定値が「無い」ので、
+    /// 行ごと消すと設定ファイルからこの機能の存在が読み取れなくなる。
+    #[test]
+    fn the_default_config_shows_how_to_write_ignore_as_a_comment() {
+        let rendered = render_toml(&builtin_default());
+        assert!(
+            rendered.contains("# ignore = ["),
+            "書き方の例が無い: {rendered}"
+        );
+        // コメントなので、読み戻したときに効いてはいけない。
+        let dir = TempDir::new().unwrap();
+        let p = write_config(&dir, &rendered);
+        assert!(load(&p).unwrap().ignore.is_empty());
+    }
+
+    #[test]
+    fn toml_escape_covers_the_characters_that_break_a_basic_string() {
+        assert_eq!(toml_escape(r#"a"b"#), r#"a\"b"#);
+        assert_eq!(toml_escape(r"a\b"), r"a\\b");
+        assert_eq!(toml_escape("a\tb"), r"a\tb");
+        assert_eq!(toml_escape("a\nb"), r"a\nb");
+        assert_eq!(toml_escape("ふつうの文字列"), "ふつうの文字列");
+    }
+
+    /// 実装中、`\n` `\r` `\t` だけ塞いだ版が ESC（U+001B）で落ちた。1 文字ずつ
+    /// 数え上げるのは当てにならないので、全域を実際に `toml` へ通して確かめる。
+    #[test]
+    fn every_control_character_survives_a_toml_round_trip() {
+        #[derive(Deserialize)]
+        struct Probe {
+            v: String,
+        }
+        let controls = (0u32..0x20).chain([0x7F]).chain(0x80..0xA0);
+        for cp in controls {
+            let ch = char::from_u32(cp).unwrap();
+            let raw = format!("/tmp/a{ch}b");
+            let doc = format!("v = \"{}\"\n", toml_escape(&raw));
+            let back: Probe = toml::from_str(&doc)
+                .unwrap_or_else(|e| panic!("U+{cp:04X} を書き出すと読み戻せない: {e}\n{doc}"));
+            assert_eq!(back.v, raw, "U+{cp:04X} の往復で値が変わった");
+        }
     }
 
     // ---- dock の位置 ------------------------------------------------------------------
@@ -1195,6 +1413,8 @@ detect_errors = true
         cfg.detect_errors = true;
         cfg.dock_x = Some(687.25);
         cfg.dock_y = Some(20.0);
+        // 展開後（`/Users/…/work/tmp`）ではなく原文が返ることも、ここで固定される。
+        cfg.ignore = parse_ignore("~/work/tmp\n**/scratch-*/**").unwrap();
 
         let mut back = builtin_default();
         for f in fields() {

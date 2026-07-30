@@ -59,10 +59,52 @@ done_ttl_secs = 180      # 完了 → アイドルに変わるまで
 session_ttl_secs = 28800 # これだけ無更新なら生き物を消す（保険。下記参照）
 max_sessions = 12
 detect_errors = false    # Stop 時に transcript を見てエラー終了も判定する（補助手段）
+
+# 一覧に出さないセッション（下記参照）
+ignore = ["~/work/tmp", "**/cron-jobs/**"]
 ```
 
 bar はキーボードフォーカスのある画面のメニューバーに出ます（外部モニタにも追従します）。
 顔を TOML で手書きする場合は [`faces/README.md`](faces/README.md) を参照してください。
+
+</details>
+
+<details>
+<summary>特定のセッションを一覧に出さない（<code>ignore</code>）</summary>
+
+定期作業用のディレクトリなど、走ってはいるが群れに出す必要のないセッションを
+畳めます。当てる相手はセッションの作業ディレクトリで、条件は何件でも書けて、
+**どれか 1 つに当たれば外れます**。
+
+```toml
+ignore = [
+  "~/work/tmp",        # このディレクトリと配下のセッションが消える
+  "**/worktrees/**",   # glob。どの深さの worktrees も
+]
+```
+
+| 書き方 | 当たるもの |
+|---|---|
+| `/Users/me/work/tmp` · `~/work/tmp` | ワイルドカードを含まなければ、そのディレクトリと**配下すべて**。区切りで切るので `/a/foo` は `/a/foobar` に当たりません |
+| `~/work/tmp/**` · `**/cron-jobs/**` | glob。`*` と `?` は `/` をまたがず、`**` はまたぎます。末尾の `/**` は 0 段にも当たるので、そのディレクトリ自身も消えます |
+
+方言は glob の慣習どおりです（gitignore や `rg --glob` と同じ）。ですから
+**glob を書いたらそのとおりに照合します** — `~/work/tmp/*` は直下の 1 段だけで、
+配下まで含めたければ `~/work/tmp/**` と書いてください。
+
+条件は根から書きます。`cron-jobs` の 1 語では受け付けません（絶対パスに当てるので
+当たらないためです）。どの深さでも当てたいときは `**/cron-jobs/**` と書いてください。
+
+外れるのは**表示だけ**です。セッションのファイルは消えず、状態も変わりません。
+
+```sh
+ccsessions list          # ignore を効かせる。末尾に「N 件を非表示」が出ます
+ccsessions list --all    # ignore を無視して全件
+ccsessions doctor        # いま何件隠れているかを確認できます
+```
+
+書き間違えた条件はその行だけ無視して警告を出します（設定ごと既定に戻ることは
+ありません）。`ccsessions ui` からも編集できます。
 
 </details>
 
@@ -133,7 +175,7 @@ enterprise の managed settings 等でプラグインを入れられない場合
 ## CLI
 
 ```sh
-ccsessions list [--json]        # 生きているセッションの一覧
+ccsessions list [--json] [--all] # 生きているセッションの一覧（--all は ignore を無視）
 ccsessions ui                   # 設定 + 顔作りの Web UI
 ccsessions config get|set|path  # 設定の表示・変更（UI と同じ検証を通る）
 ccsessions doctor               # 診断

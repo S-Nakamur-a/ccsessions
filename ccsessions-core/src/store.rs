@@ -28,6 +28,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::ignore::IgnoreRules;
 use crate::lock::lock_exclusive_in;
 use crate::session::{DeadReason, Session};
 use crate::{sessions_dir, write_atomic};
@@ -106,17 +107,37 @@ pub fn list() -> Vec<Session> {
     list_in(&sessions_dir())
 }
 
+/// 表示するセッションと、その内訳。
+///
+/// **`ignored` と `total` は `max` の打ち切りを受けない。** 3 つの数は
+/// `shown.len() + ignored == total` では繋がらない（`shown` だけが `max` で
+/// 切られている）ので、呼び出し側は引き算ではなくこの数をそのまま使う。
+pub struct LiveSessions {
+    pub shown: Vec<Session>,
+    /// 生きていて ignore に当たった件数（`shown` から溢れた分ではない）。
+    pub ignored: usize,
+    /// 生きているセッションの総数。ignore も `max` も効かせない生の数で、
+    /// `doctor` の stale 計算が引くのはこちら。
+    pub total: usize,
+}
+
 /// 生きているセッションを最大 `max` 件、`updated` 降順で返す。
 ///
 /// 「生きている」の定義は `Session::dead_reason` — TTL 内で、かつ持ち主の
 /// プロセスが居ること。**ファイルが残っていることは生きている証拠にならない**
 /// （`SessionEnd` が飛ばない終わり方があるため）。
-pub fn list_live(now: u64, session_ttl_ms: u64, max: usize) -> Vec<Session> {
+///
+/// `ignore` は `config.toml` の表示フィルタ。**死活判定の後ろ・`max` の
+/// 打ち切りの前**で効かせる — あとに置くと ignore したセッションが枠を食って
+/// 生きているセッションを押し出す（死んだセッションを枠の前で外すのと同じ理由）。
+/// `sweep` はこの判定を一切見ない。
+pub fn list_live(now: u64, session_ttl_ms: u64, max: usize, ignore: &IgnoreRules) -> LiveSessions {
     list_live_in(
         &sessions_dir(),
         now,
         session_ttl_ms,
         max,
+        ignore,
         &crate::process::is_alive,
     )
 }
@@ -228,13 +249,34 @@ fn list_live_in(
     now: u64,
     session_ttl_ms: u64,
     max: usize,
+    ignore: &IgnoreRules,
     alive: &dyn Fn(u32) -> bool,
-) -> Vec<Session> {
-    list_in(dir)
-        .into_iter()
-        .filter(|s| s.is_live(now, session_ttl_ms, alive))
-        .take(max)
-        .collect()
+) -> LiveSessions {
+    // イテレータの `filter().take(max)` では書けない。`take` が枠を埋めた時点で
+    // 残りの要素は遅延評価のまま一度も見られず、その後ろに並ぶ ignore 対象が
+    // `ignored` から数え落ちる。
+    let mut shown = Vec::new();
+    let mut ignored = 0usize;
+    let mut total = 0usize;
+    for s in list_in(dir) {
+        if !s.is_live(now, session_ttl_ms, alive) {
+            continue; // 死は死。ignore にも total にも入れない。
+        }
+        total += 1;
+        if ignore.matches(&s) {
+            ignored += 1;
+            continue;
+        }
+        // 打ち切りは ignore を弾いたあと（ADR 0026）。
+        if shown.len() < max {
+            shown.push(s);
+        }
+    }
+    LiveSessions {
+        shown,
+        ignored,
+        total,
+    }
 }
 
 fn sweep_in(
@@ -297,6 +339,43 @@ mod tests {
     /// すべて生きている扱い（pid を見ない従来どおりの挙動を確かめるとき用）。
     fn all_alive(_: u32) -> bool {
         true
+    }
+
+    /// 既定の TTL（8 時間）で引く `list_live_in`。TTL そのものを見るテストだけが
+    /// `list_live_in` を直に叩く。
+    fn live_in(
+        dir: &Path,
+        max: usize,
+        ignore: &IgnoreRules,
+        alive: &dyn Fn(u32) -> bool,
+    ) -> LiveSessions {
+        list_live_in(dir, 10_000, 8 * 3600 * 1000, max, ignore, alive)
+    }
+
+    fn ids(live: &LiveSessions) -> Vec<&str> {
+        live.shown.iter().map(|s| s.id.as_str()).collect()
+    }
+
+    /// 生きたセッションを 1 件置く。
+    fn put(dir: &Path, id: &str, cwd: &str, updated: u64, pid: u32) {
+        save_in(dir, &session_in(id, cwd, updated, Some(pid))).unwrap();
+    }
+
+    /// 同じ cwd のセッションを `n` 件、`updated` を 1 ずつずらして置く。一覧は
+    /// `updated` 降順なので、`updated_base` の大小がそのまま「どちらが `max` の
+    /// 枠を先に取るか」になる。pid は `updated` から採る（重複しない）。
+    fn put_many(dir: &Path, prefix: &str, cwd: &str, n: u32, updated_base: u64) {
+        for i in 0..n {
+            let updated = updated_base + u64::from(i);
+            put(dir, &format!("{prefix}-{i}"), cwd, updated, updated as u32);
+        }
+    }
+
+    /// テストで使う ignore の束。条件そのものの検証は `ignore` モジュール側。
+    fn hide(patterns: &[&str]) -> IgnoreRules {
+        let (rules, errors) = IgnoreRules::parse_lines_in(patterns, Path::new("/Users/tester"));
+        assert!(errors.is_empty(), "テストの条件が壊れている: {errors:?}");
+        rules
     }
 
     // ---- round trip ---------------------------------------------------------
@@ -403,11 +482,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         save_in(dir.path(), &session("fresh", 9000)).unwrap();
         save_in(dir.path(), &session("stale", 0)).unwrap();
-        let now = 10_000;
-        let ttl = 5_000;
-        let live = list_live_in(dir.path(), now, ttl, 100, &all_alive);
-        let ids: Vec<&str> = live.iter().map(|s| s.id.as_str()).collect();
-        assert_eq!(ids, vec!["fresh"]);
+        let none = IgnoreRules::default();
+        let live = list_live_in(dir.path(), 10_000, 5_000, 100, &none, &all_alive);
+        assert_eq!(ids(&live), vec!["fresh"]);
     }
 
     #[test]
@@ -416,8 +493,9 @@ mod tests {
         for i in 0..5 {
             save_in(dir.path(), &session(&format!("s{i}"), 1000 + i)).unwrap();
         }
-        let live = list_live_in(dir.path(), 2000, 10_000, 3, &all_alive);
-        assert_eq!(live.len(), 3);
+        let none = IgnoreRules::default();
+        let live = list_live_in(dir.path(), 2_000, 10_000, 3, &none, &all_alive);
+        assert_eq!(live.shown.len(), 3);
     }
 
     // ---- list_live: 死んだプロセスの除外（ゾンビ表示の回帰防止）------------------
@@ -431,15 +509,14 @@ mod tests {
     fn dead_sessions_from_the_same_workdir_are_not_listed() {
         let dir = TempDir::new().unwrap();
         let wd = "/Users/x/.claudep/clean-workdir";
-        save_in(dir.path(), &session_in("zombie-1", wd, 9_000, Some(101))).unwrap();
-        save_in(dir.path(), &session_in("zombie-2", wd, 9_100, Some(102))).unwrap();
-        save_in(dir.path(), &session_in("zombie-3", wd, 9_200, Some(103))).unwrap();
-        save_in(dir.path(), &session_in("running", wd, 9_300, Some(999))).unwrap();
+        put(dir.path(), "zombie-1", wd, 9_000, 101);
+        put(dir.path(), "zombie-2", wd, 9_100, 102);
+        put(dir.path(), "zombie-3", wd, 9_200, 103);
+        put(dir.path(), "running", wd, 9_300, 999);
 
-        let live = list_live_in(dir.path(), 10_000, 8 * 3600 * 1000, 12, &only_alive(&[999]));
-        let ids: Vec<&str> = live.iter().map(|s| s.id.as_str()).collect();
+        let live = live_in(dir.path(), 12, &IgnoreRules::default(), &only_alive(&[999]));
         assert_eq!(
-            ids,
+            ids(&live),
             vec!["running"],
             "同じ workdir の死んだセッションは 1 件も残ってはいけない"
         );
@@ -451,22 +528,21 @@ mod tests {
     fn live_sessions_sharing_a_workdir_are_all_kept() {
         let dir = TempDir::new().unwrap();
         let wd = "/Users/x/proj";
-        save_in(dir.path(), &session_in("live-a", wd, 9_000, Some(11))).unwrap();
-        save_in(dir.path(), &session_in("live-b", wd, 9_100, Some(22))).unwrap();
-        save_in(dir.path(), &session_in("dead", wd, 9_200, Some(33))).unwrap();
+        put(dir.path(), "live-a", wd, 9_000, 11);
+        put(dir.path(), "live-b", wd, 9_100, 22);
+        put(dir.path(), "dead", wd, 9_200, 33);
         // pid を持たない古い形式のセッションも、生存確認できないだけで生きている。
         save_in(dir.path(), &session_in("legacy", wd, 9_300, None)).unwrap();
 
-        let live = list_live_in(
+        let live = live_in(
             dir.path(),
-            10_000,
-            8 * 3600 * 1000,
             12,
+            &IgnoreRules::default(),
             &only_alive(&[11, 22]),
         );
-        let mut ids: Vec<&str> = live.iter().map(|s| s.id.as_str()).collect();
-        ids.sort_unstable();
-        assert_eq!(ids, vec!["legacy", "live-a", "live-b"]);
+        let mut listed = ids(&live);
+        listed.sort_unstable();
+        assert_eq!(listed, vec!["legacy", "live-a", "live-b"]);
     }
 
     /// 死んだセッションが `max` の枠を食い潰さないこと。ゾンビの実害はこれ
@@ -476,26 +552,104 @@ mod tests {
     fn dead_sessions_do_not_consume_the_max_slots() {
         let dir = TempDir::new().unwrap();
         // 死んだセッションの方が新しい ＝ `updated` 降順では先に並ぶ。
-        for i in 0..5u32 {
-            save_in(
-                dir.path(),
-                &session_in(
-                    &format!("dead-{i}"),
-                    "/w",
-                    9_000 + u64::from(i),
-                    Some(i + 10),
-                ),
-            )
-            .unwrap();
-        }
-        save_in(dir.path(), &session_in("alive", "/w", 8_000, Some(777))).unwrap();
+        put_many(dir.path(), "dead", "/w", 5, 9_000);
+        put(dir.path(), "alive", "/w", 8_000, 777);
 
-        let live = list_live_in(dir.path(), 10_000, 8 * 3600 * 1000, 3, &only_alive(&[777]));
-        let ids: Vec<&str> = live.iter().map(|s| s.id.as_str()).collect();
-        assert_eq!(ids, vec!["alive"]);
+        let live = live_in(dir.path(), 3, &IgnoreRules::default(), &only_alive(&[777]));
+        assert_eq!(ids(&live), vec!["alive"]);
+    }
+
+    // ---- list_live: ignore フィルタ ---------------------------------------------
+
+    #[test]
+    fn an_ignored_session_is_not_listed() {
+        let dir = TempDir::new().unwrap();
+        put(dir.path(), "hidden", "/w/hidden", 9_000, 1);
+        put(dir.path(), "shown", "/w/visible", 9_100, 2);
+
+        let live = live_in(dir.path(), 12, &hide(&["/w/hidden"]), &all_alive);
+        assert_eq!(ids(&live), vec!["shown"]);
+        assert_eq!(live.ignored, 1);
+    }
+
+    /// 数え落とすと `ccsessions list` の「N 件を非表示」が過少申告になり、
+    /// `total` を `shown.len()` に退化させると、枠から溢れた生きているセッション
+    /// まで `doctor` の stale（掃除されていない死骸の数）に数えられる。しかも
+    /// この条件（生きているセッションが `max` を超える）は、ignore がいちばん
+    /// 役に立つ場面そのもの。
+    #[test]
+    fn the_counts_are_not_truncated_by_the_max_slots() {
+        let dir = TempDir::new().unwrap();
+        // 非 ignore を新しく（＝先頭に並ぶ）、ignore 対象を古く（＝最後尾）。
+        put_many(dir.path(), "visible", "/w/visible", 15, 9_000);
+        put_many(dir.path(), "hidden", "/w/hidden", 5, 1_000);
+
+        let live = live_in(dir.path(), 12, &hide(&["/w/hidden"]), &all_alive);
+        assert_eq!(live.shown.len(), 12, "枠ぶんは出ること");
+        assert_eq!(
+            live.ignored, 5,
+            "枠が埋まったあとに並ぶ ignore 対象まで数えること"
+        );
+        assert_eq!(live.total, 20, "total は生きているセッションの総数");
+    }
+
+    /// [ADR 0026](../../docs/adr/0026-ignore-is-a-display-filter.md) の本題。
+    /// フィルタを打ち切りの後ろに置くと、`updated` の新しい ignore 対象 5 件が
+    /// 枠を食い、古い生きたセッションが押し出されてここが落ちる。
+    #[test]
+    fn ignored_sessions_do_not_consume_the_max_slots() {
+        let dir = TempDir::new().unwrap();
+        put_many(dir.path(), "hidden", "/w/hidden", 5, 9_000);
+        put(dir.path(), "shown", "/w/visible", 8_000, 777);
+
+        let live = live_in(dir.path(), 3, &hide(&["/w/hidden"]), &all_alive);
+        assert_eq!(ids(&live), vec!["shown"]);
+        assert_eq!(live.ignored, 5);
+    }
+
+    #[test]
+    fn an_empty_ignore_list_changes_nothing() {
+        let dir = TempDir::new().unwrap();
+        put(dir.path(), "a", "/w/proj", 9_000, 1);
+        put(dir.path(), "b", "/w/other", 9_100, 2);
+
+        let live = live_in(dir.path(), 12, &IgnoreRules::default(), &all_alive);
+        let mut listed = ids(&live);
+        listed.sort_unstable();
+        assert_eq!(listed, vec!["a", "b"]);
+        assert_eq!(live.ignored, 0);
+    }
+
+    /// 死は死。ignore にも当たる死んだセッションを `ignored` の数に入れると、
+    /// 「掃除されていない死骸の数」（`doctor.rs` の `stale`）との二重計上になり、
+    /// 診断が嘘をつく。
+    #[test]
+    fn a_dead_session_is_not_counted_as_ignored() {
+        let dir = TempDir::new().unwrap();
+        put(dir.path(), "dead-hidden", "/w/hidden", 9_000, 1);
+
+        // `only_alive(&[])` ＝ どの pid も生きていない ＝ この 1 件は死んでいる。
+        let live = live_in(dir.path(), 12, &hide(&["/w/hidden"]), &only_alive(&[]));
+        assert!(live.shown.is_empty());
+        assert_eq!(
+            live.ignored, 0,
+            "死んでいるセッションは ignore の数に入れてはいけない（死は死）"
+        );
     }
 
     // ---- sweep ------------------------------------------------------------------
+
+    /// `sweep_in` は ignore を引数にすら取らない。当たる cwd で走っている
+    /// 生きたセッションのファイルが消えないことを、ここで固定しておく。
+    #[test]
+    fn sweep_does_not_look_at_the_ignore_list() {
+        let dir = TempDir::new().unwrap();
+        put(dir.path(), "hidden", "/w/hidden", 9_500, 777);
+
+        let removed = sweep_in(dir.path(), 10_000, 8 * 3600 * 1000, &only_alive(&[777]));
+        assert!(removed.is_empty());
+        assert!(load_in(dir.path(), "hidden").unwrap().is_some());
+    }
 
     #[test]
     fn sweep_removes_expired_and_reports_them() {

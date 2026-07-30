@@ -36,6 +36,7 @@ crate / モジュール境界で分離する**のが全体の設計原理。デ�
 | `store.rs` / `lock.rs` | 1 セッション 1 ファイル・atomic write / 並列 hook 間の `flock` |
 | `process.rs` | 持ち主 pid の生存確認（`kill` は POSIX、ゾンビ判定は macOS 固有） |
 | `config.rs` | 設定。**キー・型・選択肢・検証を `fields()` / `set_field()` に集約** |
+| `ignore/` | 一覧から外す条件（`parse` 検証 / `glob` 照合）。**表示のフィルタで、生死ではない** |
 | `face/` | 顔のデータモデル（`spec` / `parse` / `validate` / `registry` / `svg` / `golden`） |
 | `face/builder/` | キャラクタービルダー（`parts` パーツの表 / `shape` 幾何 / `emit` TOML 生成） |
 | `transcript.rs` | transcript の tail 読み。エラー判定（補助手段・既定 off）とセッションタイトル |
@@ -66,6 +67,7 @@ store を更新する。`settings_json.rs` は `~/.claude/settings.json` を**�
 | **`Stop` でサブエージェントを消さない（`background_tasks` と突き合わせる）** | teammate が働いている間ずっと「完了」→「判断待ち」に見える |
 | **ストアの書き手は `lock_exclusive` を保持する** | 並列 hook の read-modify-write が後勝ちで消える |
 | **死活は pid で決める（ゾンビは死）。TTL は保険** | 死んだセッションが 8 時間居座り、枠を食う |
+| **`ignore` は `take(max)` の前で外す。`sweep` には効かせない** | 隠したセッションが枠を食って生きているセッションを押し出す／表示のフィルタのはずがファイルを消す |
 | **bar はメニューバー高に収まる（33pt / 24pt）** | 帯の矩形ぶんメニューバーのクリックを奪う |
 | **群れの縮小は一様** | 縮めたのにはみ出す／体だけ縮んで目が飛び出す |
 | **アニメは CoreAnimation に自走させる／レイヤを作り直さない** | 常時 CPU を食う／群れが不自然に同期する |
