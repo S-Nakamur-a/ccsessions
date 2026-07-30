@@ -76,29 +76,29 @@ external monitors). To hand-write a face in TOML, see [`faces/README.md`](faces/
 <summary>Keeping some sessions out of the list (<code>ignore</code>)</summary>
 
 Some sessions are running but do not need a creature — a directory you use for
-scheduled jobs, for instance. Write as many rules as you like; **a session is
-hidden as soon as one of them matches.**
+scheduled jobs, for instance. Rules are matched against the session's working
+directory. Write as many as you like; **a session is hidden as soon as one of them
+matches.**
 
 ```toml
 ignore = [
-  "~/work/tmp",        # a path: this directory and everything below it
-  "cron-jobs",         # relative: matches at any depth (/Users/me/cron-jobs too)
-  "**/worktrees/**",   # a glob
-  "name:scratch-*",    # matches the display name (the last segment of the cwd)
-  "title:Nightly*",    # matches the session title Claude Code gave it
+  "~/work/tmp",        # this directory and everything below it
+  "**/worktrees/**",   # a glob: worktrees at any depth
 ]
 ```
 
 | Rule | What it matches |
 |---|---|
-| `/Users/me/work/tmp` · `~/work/tmp` | That directory and **everything below it**. It breaks on separators, so `/a/foo` does not match `/a/foobar` |
-| `cron-jobs` · `work/tmp` | Anything not starting with `/` matches **at any depth** (subtree included). It aligns to separators, so it does not match `crontab` or `my-cron-jobs` |
-| `**/cron-jobs/**` | A glob. `*` and `?` stay within one path segment; `**` crosses them. A trailing `/**` also matches zero segments, so the directory itself is hidden too |
-| `name:` · `title:` | A glob over the display name or the session title. `title:` never matches a session whose title could not be read |
+| `/Users/me/work/tmp` · `~/work/tmp` | With no wildcard: that directory and **everything below it**. It breaks on separators, so `/a/foo` does not match `/a/foobar` |
+| `~/work/tmp/**` · `**/cron-jobs/**` | A glob. `*` and `?` stay within one path segment; `**` crosses them. A trailing `/**` also matches zero segments, so the directory itself is hidden too |
 
-**A glob is matched exactly as written.** `~/work/tmp/*` covers only one level;
-write `~/work/tmp/**` if you want the whole subtree (otherwise `*` and `**` would
-mean the same thing).
+The dialect is the usual one (the same as gitignore or `rg --glob`), so **a glob is
+matched exactly as written** — `~/work/tmp/*` covers only one level; write
+`~/work/tmp/**` if you want the whole subtree.
+
+Rules are anchored at the root. A bare `cron-jobs` is refused, because it is matched
+against an absolute path and could never hit. Write `**/cron-jobs/**` to match at any
+depth.
 
 Only the **display** is affected. The session file stays where it is and the state
 does not change.

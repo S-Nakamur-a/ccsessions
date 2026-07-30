@@ -379,10 +379,10 @@ detect_errors = {detect_errors}
     // の対象外なので、これで壊れるものは無い。
     if c.ignore.is_empty() {
         out.push_str(
-            "\n# Sessions to keep out of the list: a path (prefix match, `~` allowed), a relative\n\
-             # path (matched at any depth), a glob (`*` and `?` stay within one path segment,\n\
-             # `**` crosses them), or a `name:` / `title:` glob.\n\
-             # ignore = [\"~/work/tmp\", \"**/cron-jobs/**\", \"name:scratch-*\"]\n",
+            "\n# Sessions to keep out of the list. With no wildcard: that path and everything\n\
+             # below it (`~` allowed). Globs work too (`*` and `?` stay within one path\n\
+             # segment, `**` crosses them).\n\
+             # ignore = [\"~/work/tmp\", \"**/cron-jobs/**\"]\n",
         );
     } else {
         out.push_str(
@@ -648,15 +648,16 @@ static FIELDS: &[FieldSpec] = &[
             key: "ignore",
             label: l("一覧に出さない", "Keep out of the list"),
             kind: FieldKind::Lines {
-                placeholder: "~/work/tmp\n**/cron-jobs/**\nname:scratch-*",
+                placeholder: "~/work/tmp\n**/cron-jobs/**",
             },
             help: l(
-                "1 行 1 件。パスは前方一致（配下も含む・`~` 可）、`*` `?` `**` で glob、\
-                 `name:` `title:` で名前とタイトルに当てる。表示から外すだけで、\
+                "1 行 1 件、当てる相手は作業ディレクトリ。ワイルドカード無しなら\
+                 そのパスと配下すべて（`~` 可）、`*` `?` `**` で glob。表示から外すだけで、\
                  セッションは消えない（`ccsessions list --all` で見える）。",
-                "One rule per line. A path matches itself and everything below it (`~` allowed), \
-                 `*` `?` `**` are globs, and `name:` / `title:` match the name and the title. \
-                 This only hides them — nothing is deleted (`ccsessions list --all` shows them).",
+                "One rule per line, matched against the working directory. With no wildcard, \
+                 a path matches itself and everything below it (`~` allowed); `*` `?` `**` are \
+                 globs. This only hides them — nothing is deleted (`ccsessions list --all` \
+                 shows them).",
             ),
         },
         FieldSpec {
@@ -1219,14 +1220,14 @@ detect_errors = true
         let dir = TempDir::new().unwrap();
         let p = dir.path().join("config.toml");
         let mut cfg = builtin_default();
-        cfg.ignore = parse_ignore("/tmp/a\"b\n/tmp/c\\d\nname:*\"*").unwrap();
+        cfg.ignore = parse_ignore("/tmp/a\"b\n/tmp/c\\d\n/tmp/*\"*").unwrap();
 
         save(&p, &cfg).unwrap();
         let loaded = load(&p).unwrap_or_else(|e| panic!("書き出した TOML を読み戻せない: {e}"));
         assert_eq!(loaded.ignore, cfg.ignore);
         assert_eq!(
             loaded.ignore.raw().collect::<Vec<_>>(),
-            vec!["/tmp/a\"b", "/tmp/c\\d", "name:*\"*"]
+            vec!["/tmp/a\"b", "/tmp/c\\d", "/tmp/*\"*"]
         );
     }
 
@@ -1430,7 +1431,7 @@ detect_errors = true
         cfg.dock_x = Some(687.25);
         cfg.dock_y = Some(20.0);
         // 展開後（`/Users/…/work/tmp`）ではなく原文が返ることも、ここで固定される。
-        cfg.ignore = parse_ignore("~/work/tmp\nname:scratch-*").unwrap();
+        cfg.ignore = parse_ignore("~/work/tmp\n**/scratch-*/**").unwrap();
 
         let mut back = builtin_default();
         for f in fields() {

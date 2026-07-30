@@ -90,7 +90,7 @@ pub fn run() -> i32 {
     }
     if live.ignored > 0 {
         // 各条件を `"` で囲む。生のままコンマ区切りで並べると、条件自身に
-        // コンマを含む場合（`name:a,b` 等）に何件あるか読めなくなる。
+        // コンマを含む場合（`/work/a,b` 等）に何件あるか読めなくなる。
         let conditions: Vec<String> = cfg.ignore.raw().map(|s| format!("{s:?}")).collect();
         println!(
             "ignored:         {} hidden by ignore (rules: {})",

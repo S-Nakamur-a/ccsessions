@@ -520,7 +520,7 @@ fn list_hides_ignored_sessions() {
         &[],
         &payload("shown", "UserPromptSubmit", "/tmp/visible"),
     );
-    write_config(&state, &["cron-jobs"]);
+    write_config(&state, &["**/cron-jobs/**"]);
 
     let stdout = list_output(&state, &[]);
     assert!(stdout.contains("visible"), "{stdout:?}");
@@ -537,7 +537,7 @@ fn list_all_shows_them_again() {
         &[],
         &payload("hidden", "UserPromptSubmit", "/tmp/cron-jobs"),
     );
-    write_config(&state, &["cron-jobs"]);
+    write_config(&state, &["**/cron-jobs/**"]);
 
     let stdout = list_output(&state, &["--all"]);
     assert!(stdout.contains("cron-jobs"), "{stdout:?}");
@@ -560,7 +560,7 @@ fn list_reports_how_many_were_hidden() {
         &[],
         &payload("shown", "UserPromptSubmit", "/tmp/visible"),
     );
-    write_config(&state, &["cron-jobs"]);
+    write_config(&state, &["**/cron-jobs/**"]);
 
     let stdout = list_output(&state, &[]);
     assert!(
@@ -601,7 +601,7 @@ fn list_all_is_not_capped_by_max_sessions() {
         );
     }
     // 枠を 2 に絞る。live は 5 件（ignore 対象 2 ＋ 非 ignore 3）なので枠を超える。
-    write_config_with_max(&state, &["cron-jobs"], 2);
+    write_config_with_max(&state, &["**/cron-jobs/**"], 2);
 
     let out = Command::new(bin())
         .arg("list")
@@ -654,7 +654,7 @@ fn an_ignored_session_is_not_counted_as_stale() {
             ),
         );
     }
-    write_config_with_max(&state, &["cron-jobs"], 2);
+    write_config_with_max(&state, &["**/cron-jobs/**"], 2);
 
     let out = Command::new(bin())
         .arg("doctor")

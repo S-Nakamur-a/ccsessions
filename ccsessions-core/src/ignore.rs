@@ -11,20 +11,24 @@
 //!
 //! # 条件の書き方
 //!
+//! **当てる相手は cwd だけ**で、書き方は 2 つしかない。
+//!
 //! | 書き方 | 意味 |
 //! |---|---|
-//! | `/Users/x/work/tmp` | 絶対パスの前方一致。**ディレクトリ境界で切る**ので `/a/foo` は `/a/foobar` に当たらない。配下も含む |
-//! | `~/work/tmp` | 同上。`~` は `$HOME` に展開する |
-//! | `cron-jobs` / `work/tmp` | 相対。**どの深さでも**当たる（連続するセグメント列として照合）。配下も含む |
-//! | `**/cron-jobs/**` | glob。`*` `?` は `/` をまたがず、`**` はまたぐ |
-//! | `name:scratch-*` | 表示名（cwd の basename）に対する glob |
-//! | `title:定期*` | セッションタイトルに対する glob |
+//! | `/Users/x/work/tmp` · `~/work/tmp` | ワイルドカードを含まない ＝ そのパスと**配下すべて**。**ディレクトリ境界で切る**ので `/a/foo` は `/a/foobar` に当たらない |
+//! | `~/work/tmp/**` · `**/cron-jobs/**` | glob。`*` `?` は `/` をまたがず、`**` はまたぐ |
 //!
-//! **glob を書いたらそのとおりに照合する** — 前方一致のような「配下も含む」暗黙の
-//! 拡張はしない。`~/work/tmp/*` は直下の 1 段だけで、配下まで含めたければ
-//! `~/work/tmp/**` と書く。そうしないと `*` と `**` の区別が無くなり、glob を
-//! 知っている人ほど裏切られる。唯一の例外は**相対 glob の先頭**で、
-//! `cron-*` は `**/cron-*` として扱う（相対の意味が「どの深さでも」なので）。
+//! 方言は glob の慣習どおり（gitignore / ripgrep と同じ）。**glob を書いたら
+//! そのとおりに照合する** — 「配下も含む」暗黙の拡張はワイルドカードを 1 つも
+//! 書かなかった条件にだけ与える。`~/work/tmp/*` は直下の 1 段だけで、配下まで
+//! 含めたければ `~/work/tmp/**` と書く。そうしないと `*` と `**` の区別が無くなり、
+//! glob を知っている人ほど裏切られる。
+//!
+//! **根から書かれていない条件は受け付けない。** 照合の相手は必ず絶対パスなので、
+//! `cron-jobs` と書いても当たらない。当たらないものを黙って受けるのが一番たちが
+//! 悪く（書いたのに何も隠れず、警告も出ない）、かといって gitignore のように
+//! 「どの深さでも」と解釈すると、1 語書いただけで意図しない深さまで広く消える。
+//! `**/cron-jobs/**` と明示させる。
 
 use std::path::Path;
 
@@ -33,10 +37,6 @@ use crate::session::Session;
 /// 1 条件の長さの上限。**glob の照合は最悪 O(パターン長 × 対象長)** なので、
 /// poller が毎 tick 踏む経路に置く以上は上限を切っておく。
 const MAX_PATTERN_LEN: usize = 512;
-
-const NAME_PREFIX: &str = "name:";
-const TITLE_PREFIX: &str = "title:";
-const CWD_PREFIX: &str = "cwd:";
 
 // ---------------------------------------------------------------------------
 // パターン
@@ -48,24 +48,18 @@ enum Seg {
     /// `**` — 0 段以上のセグメントに当たる。
     DoubleStar,
     /// `*` / `?` を含みうる 1 段ぶんのパターン。文字単位で持つのは、
-    /// マルチバイト（`title:定期*`）でも `?` が 1 文字として振る舞うため。
+    /// マルチバイトなディレクトリ名でも `?` が 1 文字として振る舞うため。
     Pat(Vec<char>),
 }
 
-/// 条件の実体。**どのフィールドに当てるか**まで含めてここで決まる。
+/// 条件の実体。
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Matcher {
-    /// 絶対パスの前方一致（セグメント単位なので自然にディレクトリ境界で切れる）。
-    /// 配下も含む。空なら「すべて」（条件 `/`）。
-    CwdPrefix(Vec<String>),
-    /// 連続するセグメント列が cwd のどこかに現れる（gitignore 方式）。配下も含む。
-    CwdSegments(Vec<String>),
-    /// cwd に対する glob。書いたとおりに照合する。
-    CwdGlob(Vec<Seg>),
-    /// `name` に対する glob。
-    Name(Vec<char>),
-    /// `title` に対する glob。`title` が無いセッションには当たらない。
-    Title(Vec<char>),
+    /// ワイルドカードを含まない条件。前方一致（セグメント単位なので自然に
+    /// ディレクトリ境界で切れる）で、配下も含む。空なら「すべて」（条件 `/`）。
+    Prefix(Vec<String>),
+    /// glob。書いたとおりに照合する。
+    Glob(Vec<Seg>),
 }
 
 /// 一覧から外す条件 1 つ。
@@ -114,119 +108,72 @@ impl IgnorePattern {
             ));
         }
 
-        let matcher = if let Some(body) = trimmed.strip_prefix(NAME_PREFIX) {
-            Matcher::Name(text_glob(body, NAME_PREFIX)?)
-        } else if let Some(body) = trimmed.strip_prefix(TITLE_PREFIX) {
-            Matcher::Title(text_glob(body, TITLE_PREFIX)?)
-        } else {
-            let body = trimmed.strip_prefix(CWD_PREFIX).unwrap_or(trimmed).trim();
-            cwd_matcher(body, home)?
-        };
-
         Ok(IgnorePattern {
             raw: trimmed.to_string(),
-            matcher,
+            matcher: path_matcher(trimmed, home)?,
         })
     }
 
     /// このセッションを一覧から外すか。
     pub fn matches(&self, s: &Session) -> bool {
         match &self.matcher {
-            Matcher::CwdPrefix(p) => path_prefix_matches(p, &s.cwd),
-            Matcher::CwdSegments(pat) => segments_contain(pat, &s.cwd),
+            Matcher::Prefix(p) => path_prefix_matches(p, &s.cwd),
             // 文字列→文字列への変換はここで 1 回だけ行う。`match_segments` の中で
             // やるとバックトラックのたびに同じセグメントを変換し直す。
-            Matcher::CwdGlob(segs) => {
+            Matcher::Glob(segs) => {
                 let cwd: Vec<Vec<char>> = split_path(&s.cwd)
                     .into_iter()
                     .map(|seg| seg.chars().collect())
                     .collect();
                 match_segments(segs, &cwd)
             }
-            Matcher::Name(pat) => glob_chars(pat, &s.name.chars().collect::<Vec<_>>()),
-            // タイトルは取れないことがある（transcript から拾うため）。
-            // 取れていないセッションに当てるとフィルタが気まぐれになるので、
-            // `None` には当たらないと決めておく。
-            Matcher::Title(pat) => s
-                .title
-                .as_deref()
-                .is_some_and(|t| glob_chars(pat, &t.chars().collect::<Vec<_>>())),
         }
     }
 }
 
-/// `name:` / `title:` の本体。パスではないので `/` の特別扱いはしない。
-fn text_glob(body: &str, prefix: &str) -> Result<Vec<char>, String> {
-    let body = body.trim();
-    if body.is_empty() {
-        return Err(format!("ignore: nothing follows {prefix}"));
-    }
-    Ok(body.chars().collect())
-}
-
-/// 接頭辞の無い条件（＝ cwd に当てる）の形を決める。
-fn cwd_matcher(body: &str, home: &Path) -> Result<Matcher, String> {
+/// 条件の形を決める。
+fn path_matcher(body: &str, home: &Path) -> Result<Matcher, String> {
     let expanded = expand_home(body, home)?;
     if expanded.is_empty() {
         return Err("ignore: an empty rule is not allowed".to_string());
     }
+    let segs = split_path(&expanded);
     // **`.` / `..` は弾く。** 通すとセグメント比較で永久に不一致になり、
     // 「書いたのに何も隠れないが、警告も出ない」という一番たちの悪い形になる
     // （実在の cwd に `.` セグメントは現れない）。
-    if let Some(dot) = split_path(&expanded)
-        .into_iter()
-        .find(|s| *s == "." || *s == "..")
-    {
+    if let Some(dot) = segs.iter().find(|s| **s == "." || **s == "..") {
         return Err(format!(
-            "ignore: cannot resolve {dot:?} in {body:?} (write an absolute path, a `~/` path, \
-             or a relative path with no separator)"
+            "ignore: cannot resolve {dot:?} in {body:?} (write an absolute path, or one \
+             starting with `~/`)"
+        ));
+    }
+    // **根から書かれていない条件も弾く**（モジュール doc 参照）。`**` 始まりは
+    // 「どの深さでも」を明示して書いた形なので通す。
+    if !expanded.starts_with('/') && segs.first() != Some(&"**") {
+        return Err(format!(
+            "ignore: {body:?} is not anchored at the root (start it with `/` or `~/`, or \
+             prefix it with `**/` as in `**/cron-jobs/**` to match at any depth)"
         ));
     }
 
-    // glob 文字が無ければパスとして扱う。「配下も含む前方一致」は、glob を
+    // ワイルドカードが無ければパスとして扱う。「配下も含む前方一致」は、glob を
     // 書いていない条件にだけ与える暗黙の拡張（モジュール doc 参照）。
     if !expanded.contains('*') && !expanded.contains('?') {
-        return Ok(if expanded.starts_with('/') {
-            // セグメント列として持つ。文字列の `starts_with` で書くと、
-            // 区切りの重複（`/a//foo`）を吸収できず、`CwdSegments` /
-            // `CwdGlob`（どちらも `split_path` を通る）とだけ挙動がずれる。
-            Matcher::CwdPrefix(
-                split_path(&expanded)
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect(),
-            )
-        } else {
-            let segs: Vec<String> = split_path(&expanded)
-                .into_iter()
-                .map(str::to_string)
-                .collect();
-            if segs.is_empty() {
-                return Err("ignore: an empty rule is not allowed".to_string());
-            }
-            Matcher::CwdSegments(segs)
-        });
+        return Ok(Matcher::Prefix(
+            segs.into_iter().map(str::to_string).collect(),
+        ));
     }
-
-    let absolute = expanded.starts_with('/');
-    let mut segs: Vec<Seg> = split_path(&expanded)
-        .into_iter()
-        .map(|s| {
-            if s == "**" {
-                Seg::DoubleStar
-            } else {
-                Seg::Pat(s.chars().collect())
-            }
-        })
-        .collect();
-    if segs.is_empty() {
-        return Err("ignore: an empty rule is not allowed".to_string());
-    }
-    // 相対 glob は「どの深さでも」。先頭に `**` を補う（既に `**` なら不要）。
-    if !absolute && segs.first() != Some(&Seg::DoubleStar) {
-        segs.insert(0, Seg::DoubleStar);
-    }
-    Ok(Matcher::CwdGlob(segs))
+    Ok(Matcher::Glob(
+        segs.into_iter()
+            .map(|s| {
+                if s == "**" {
+                    Seg::DoubleStar
+                } else {
+                    Seg::Pat(s.chars().collect())
+                }
+            })
+            .collect(),
+    ))
 }
 
 /// 先頭の `~` を展開する。`~user` は展開しない（誰の home か決められない）。
@@ -329,16 +276,6 @@ fn split_path(p: &str) -> Vec<&str> {
 fn path_prefix_matches(prefix: &[String], cwd: &str) -> bool {
     let segs = split_path(cwd);
     prefix.len() <= segs.len() && prefix.iter().zip(&segs).all(|(a, b)| a == b)
-}
-
-/// `pat` のセグメント列が `cwd` のどこかに連続して現れるか（gitignore 方式）。
-fn segments_contain(pat: &[String], cwd: &str) -> bool {
-    let segs = split_path(cwd);
-    if pat.is_empty() || pat.len() > segs.len() {
-        return false;
-    }
-    segs.windows(pat.len())
-        .any(|w| w.iter().zip(pat).all(|(a, b)| *a == b.as_str()))
 }
 
 /// セグメント列どうしの照合。`**` は 0 段以上に当たる。
@@ -448,10 +385,10 @@ mod tests {
             .matches(&session(cwd))
     }
 
-    // ---- 絶対パスの前方一致 ---------------------------------------------------
+    // ---- ワイルドカード無し（そのパスと配下） ---------------------------------
 
     #[test]
-    fn an_absolute_path_matches_itself_and_everything_below() {
+    fn a_plain_path_matches_itself_and_everything_below() {
         assert!(hits("/a/foo", "/a/foo"));
         assert!(hits("/a/foo", "/a/foo/b/c"));
     }
@@ -459,14 +396,14 @@ mod tests {
     /// **前方一致はディレクトリ境界で切る。** ここを文字列の `starts_with` だけで
     /// 書くと、`/a/foo` を無視したつもりで `/a/foobar` まで消える。
     #[test]
-    fn an_absolute_path_does_not_match_a_longer_sibling_name() {
+    fn a_plain_path_does_not_match_a_longer_sibling_name() {
         assert!(!hits("/a/foo", "/a/foobar"));
         assert!(!hits("/a/foo", "/a/fo"));
         assert!(!hits("/a/foo", "/b/a/foo"));
     }
 
     #[test]
-    fn a_trailing_slash_does_not_change_an_absolute_path() {
+    fn a_trailing_slash_does_not_change_a_plain_path() {
         assert!(hits("/a/foo/", "/a/foo"));
         assert!(hits("/a/foo", "/a/foo/"));
     }
@@ -500,29 +437,6 @@ mod tests {
         assert!(p.matches(&session("/Users/tester/work/x")));
     }
 
-    // ---- 相対パス（gitignore 方式） -------------------------------------------
-
-    #[test]
-    fn a_relative_path_matches_at_any_depth() {
-        assert!(hits("cron-jobs", "/Users/x/cron-jobs"));
-        assert!(hits("cron-jobs", "/Users/x/cron-jobs/a/b"));
-        assert!(hits("work/tmp", "/Users/x/work/tmp/a"));
-    }
-
-    /// セグメント境界で切るので、名前の一部に含まれるだけでは当たらない。
-    #[test]
-    fn a_relative_path_matches_whole_segments_only() {
-        assert!(!hits("cron-jobs", "/Users/x/crontab"));
-        assert!(!hits("cron-jobs", "/Users/x/my-cron-jobs"));
-        assert!(!hits("cron-jobs", "/Users/x/cron-jobs-old"));
-    }
-
-    /// 連続していなければ当たらない。
-    #[test]
-    fn a_relative_path_requires_the_segments_to_be_adjacent() {
-        assert!(!hits("work/tmp", "/Users/x/work/other/tmp"));
-    }
-
     // ---- glob -----------------------------------------------------------------
 
     #[test]
@@ -539,7 +453,8 @@ mod tests {
         assert!(hits("**/cron-jobs/**", "/Users/x/cron-jobs"));
     }
 
-    /// **`*` は `/` をまたがない。** ここが崩れると `*` と `**` の区別が消える。
+    /// **`*` は `/` をまたがない**（glob の慣習どおり）。ここが崩れると `*` と
+    /// `**` の区別が消える。
     #[test]
     fn a_single_star_does_not_cross_separators() {
         assert!(hits("~/work/tmp/*", "/Users/tester/work/tmp/a"));
@@ -572,71 +487,46 @@ mod tests {
         assert!(!hits("/a/?", "/a"));
     }
 
-    /// 相対 glob は「どの深さでも」— 先頭に `**` が補われる。
-    #[test]
-    fn a_relative_glob_matches_at_any_depth() {
-        assert!(hits("cron-*", "/Users/x/cron-jobs"));
-        assert!(hits("cron-*", "/cron-jobs"));
-        // 書いたとおりに照合するので、配下までは含まない（`cron-*/**` と書く）。
-        assert!(!hits("cron-*", "/Users/x/cron-jobs/a"));
-        assert!(hits("cron-*/**", "/Users/x/cron-jobs/a"));
-    }
-
-    // ---- name: / title: -------------------------------------------------------
-
-    #[test]
-    fn a_name_pattern_matches_the_display_name() {
-        assert!(hits("name:scratch-*", "/Users/x/scratch-1"));
-        assert!(!hits("name:scratch-*", "/Users/x/scratchpad/inner"));
-        // 接頭辞なしの glob と違い、名前は丸ごと照合する。
-        assert!(!hits("name:scratch", "/Users/x/scratch-1"));
-        assert!(hits("name:scratch", "/Users/x/scratch"));
-    }
-
-    #[test]
-    fn a_title_pattern_matches_the_session_title() {
-        let mut s = session("/Users/x/proj");
-        s.title = Some("定期作業のログ整理".into());
-        let p = IgnorePattern::parse_in("title:定期*", &home()).unwrap();
-        assert!(p.matches(&s));
-    }
-
-    /// **タイトルが取れていないセッションには当たらない。** タイトルは transcript
-    /// から拾うので取れないことがあり、当ててしまうとフィルタが気まぐれになる。
-    #[test]
-    fn a_title_pattern_never_matches_a_session_without_a_title() {
-        let p = IgnorePattern::parse_in("title:*", &home()).unwrap();
-        assert!(!p.matches(&session("/Users/x/proj")));
-    }
-
     /// マルチバイトでも `?` は 1 文字。バイト単位で書くと壊れる。
     #[test]
     fn a_question_mark_counts_characters_not_bytes() {
-        let mut s = session("/Users/x/proj");
-        s.title = Some("定期".into());
-        assert!(IgnorePattern::parse_in("title:??", &home())
-            .unwrap()
-            .matches(&s));
-        assert!(!IgnorePattern::parse_in("title:?", &home())
-            .unwrap()
-            .matches(&s));
+        assert!(hits("/x/??", "/x/定期"));
+        assert!(!hits("/x/?", "/x/定期"));
     }
 
+    /// **glob は書いたとおり。** 配下まで含めたければ `**` を書く。
     #[test]
-    fn a_cwd_prefix_can_be_written_explicitly() {
-        assert!(hits("cwd:/a/foo", "/a/foo/b"));
+    fn a_glob_is_not_silently_extended_to_the_subtree() {
+        assert!(hits("**/cron-*", "/Users/x/cron-jobs"));
+        assert!(!hits("**/cron-*", "/Users/x/cron-jobs/a"));
+        assert!(hits("**/cron-*/**", "/Users/x/cron-jobs/a"));
     }
 
     // ---- 不正な条件 -----------------------------------------------------------
 
     #[test]
     fn an_empty_pattern_is_refused() {
-        for src in ["", "   ", "\t", "name:", "title:   ", "cwd:"] {
+        for src in ["", "   ", "\t"] {
             assert!(
                 IgnorePattern::parse_in(src, &home()).is_err(),
                 "{src:?} が通ってしまった"
             );
         }
+    }
+
+    /// **相対の条件は弾く。** 照合の相手は必ず絶対パスなので当たらない。黙って
+    /// 受けると「書いたのに何も隠れず、警告も出ない」になり、gitignore のように
+    /// 「どの深さでも」と解釈すると 1 語で意図せず広く消える。`**/` を明示させる。
+    #[test]
+    fn a_relative_pattern_is_refused_and_points_at_the_double_star_form() {
+        for src in ["cron-jobs", "work/tmp", "cron-*", "*foo*"] {
+            let err = IgnorePattern::parse_in(src, &home())
+                .expect_err(&format!("{src:?} が通ってしまった"));
+            assert!(err.contains("**/"), "書き直し方が分からない: {err}");
+        }
+        // `**/` を付ければ通る。
+        assert!(IgnorePattern::parse_in("**/cron-jobs/**", &home()).is_ok());
+        assert!(IgnorePattern::parse_in("**/*foo*/**", &home()).is_ok());
     }
 
     /// **制御文字は入口で弾く。** 通すと当たらないうえ、設定ファイルの
@@ -664,7 +554,7 @@ mod tests {
     }
 
     /// 区切りが重なった cwd でも前方一致が外れない。セグメント比較にしてある
-    /// ので、`CwdSegments` / `CwdGlob` と挙動がずれない。
+    /// ので、glob 側（同じ `split_path` を通る）と挙動がずれない。
     #[test]
     fn a_doubled_separator_in_the_cwd_does_not_break_a_prefix() {
         assert!(hits("/a/foo", "/a//foo/b"));
@@ -682,9 +572,9 @@ mod tests {
 
     #[test]
     fn an_overlong_pattern_is_refused() {
-        let long = "a".repeat(MAX_PATTERN_LEN + 1);
+        let long = format!("/{}", "a".repeat(MAX_PATTERN_LEN));
         assert!(IgnorePattern::parse_in(&long, &home()).is_err());
-        let ok = "a".repeat(MAX_PATTERN_LEN);
+        let ok = format!("/{}", "a".repeat(MAX_PATTERN_LEN - 1));
         assert!(IgnorePattern::parse_in(&ok, &home()).is_ok());
     }
 
@@ -700,7 +590,7 @@ mod tests {
     /// 保存のたびに `/Users/tester/work` へ化ける。
     #[test]
     fn the_written_form_is_preserved_for_round_tripping() {
-        for src in ["~/work/tmp", "**/cron-jobs/**", "name:scratch-*"] {
+        for src in ["~/work/tmp", "**/cron-jobs/**", "/a/foo"] {
             assert_eq!(IgnorePattern::parse_in(src, &home()).unwrap().as_str(), src);
         }
     }
