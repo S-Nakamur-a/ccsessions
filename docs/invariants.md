@@ -151,6 +151,23 @@ read-modify-write 全体ではない。
 - 掃除（ファイル削除）は常駐している `ccsessionsd` の仕事（起動時 + 60 秒ごと）。
   以前は `store::sweep` がどこからも呼ばれておらず、ファイルが無限に溜まっていた。
 
+### `ignore` は表示のフィルタ。`take(max)` の**前**で外し、`sweep` には効かせない
+
+`config.toml` の `ignore` に当たったセッションを `store::list_live` が一覧から外す
+（[ADR 0026](adr/0026-ignore-is-a-display-filter.md)）。守る点は 2 つ。
+
+- **絞り込みの順序は `is_live` → `ignore` → `take(max)`。** ignore を `take(max)` の
+  後ろに置くと、隠したはずのセッションが `max_sessions` の枠を食って生きている
+  セッションを押し出す — 1 つ上の「死んだセッションが枠を食う」不具合と同じ形が、
+  別の入口から復活する。番人は
+  `store.rs::ignored_sessions_do_not_consume_the_max_slots`。
+- **`sweep` は `ignore` を見ない。** 見せないことと死んだことは別で、消してしまうと
+  `--all` で戻せず、次の hook で作り直されるだけの空振りになる。番人は
+  `store.rs::sweep_does_not_look_at_the_ignore_list`。
+- 外した件数は `LiveSessions.ignored` で返す。**引き算では求められない** —
+  枠の前で外すので、1 件隠せば別のセッションが 1 件繰り上がる。`ccsessions list` の
+  「N 件を非表示」も `doctor` の `stale` 計数もこの数を直接使う。
+
 ### `Session::set_state` は状態が変わったときだけ `since` を更新する
 
 再通知で経過時間の起点が戻らないため。あわせて **`Error` 以外へ遷移したら `error_kind`

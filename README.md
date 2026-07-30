@@ -62,10 +62,56 @@ session_ttl_secs = 28800 # remove a creature after this long without an update
 max_sessions = 12
 detect_errors = false    # on Stop, also read the transcript to detect an error exit
                          # (best-effort)
+
+# Sessions to keep out of the list (see below)
+ignore = ["~/work/tmp", "**/cron-jobs/**"]
 ```
 
 `bar` draws on the menu bar of the screen that has keyboard focus (it follows you onto
 external monitors). To hand-write a face in TOML, see [`faces/README.md`](faces/README.md).
+
+</details>
+
+<details>
+<summary>Keeping some sessions out of the list (<code>ignore</code>)</summary>
+
+Some sessions are running but do not need a creature — a directory you use for
+scheduled jobs, for instance. Write as many rules as you like; **a session is
+hidden as soon as one of them matches.**
+
+```toml
+ignore = [
+  "~/work/tmp",        # a path: this directory and everything below it
+  "cron-jobs",         # relative: matches at any depth (/Users/me/cron-jobs too)
+  "**/worktrees/**",   # a glob
+  "name:scratch-*",    # matches the display name (the last segment of the cwd)
+  "title:Nightly*",    # matches the session title Claude Code gave it
+]
+```
+
+| Rule | What it matches |
+|---|---|
+| `/Users/me/work/tmp` · `~/work/tmp` | That directory and **everything below it**. It breaks on separators, so `/a/foo` does not match `/a/foobar` |
+| `cron-jobs` · `work/tmp` | Anything not starting with `/` matches **at any depth** (subtree included). It aligns to separators, so it does not match `crontab` or `my-cron-jobs` |
+| `**/cron-jobs/**` | A glob. `*` and `?` stay within one path segment; `**` crosses them. A trailing `/**` also matches zero segments, so the directory itself is hidden too |
+| `name:` · `title:` | A glob over the display name or the session title. `title:` never matches a session whose title could not be read |
+
+**A glob is matched exactly as written.** `~/work/tmp/*` covers only one level;
+write `~/work/tmp/**` if you want the whole subtree (otherwise `*` and `**` would
+mean the same thing).
+
+Only the **display** is affected. The session file stays where it is and the state
+does not change.
+
+```sh
+ccsessions list          # applies ignore; prints "N hidden" at the end
+ccsessions list --all    # every session, ignoring the rules
+ccsessions doctor        # tells you how many are currently hidden
+```
+
+A rule you typed wrong is dropped on its own, with a warning — the rest of your
+settings are never reset because of it. You can also edit the list in
+`ccsessions ui`.
 
 </details>
 
@@ -137,7 +183,7 @@ confirmed, we always err on the side of "alive". Anything that is removed is rec
 ## CLI
 
 ```sh
-ccsessions list [--json]        # list the live sessions
+ccsessions list [--json] [--all] # list the live sessions (--all ignores `ignore`)
 ccsessions ui                   # web UI for settings + face building
 ccsessions config get|set|path  # show/change settings (same validation as the UI)
 ccsessions doctor               # diagnostics

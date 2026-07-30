@@ -257,15 +257,23 @@ async function reloadBuilderText() {
   loadSavedList();
 }
 
-/** 設定 1 項目を保存する。**画面の見た目はサーバが返した値に合わせ直す** */
-async function setField(key, value) {
+/**
+ * 設定 1 項目を保存する。**画面の見た目はサーバが返した値に合わせ直す**
+ *
+ * `keepOnError` を立てると、拒否されても `loadSettings()`（＝全フィールド
+ * 作り直し）を呼ばない。`lines`（textarea）は打ち込み量に比例して失うものが
+ * 増える — 8 行打って 1 行だけ間違えると、作り直しで 8 行まるごと消える。
+ * サーバは検証前に弾いていて何も書いていないので、再取得しなくても画面と
+ * ファイルはずれない。他の kind（値が 1 個だけ）は今までどおり作り直す。
+ */
+async function setField(key, value, keepOnError) {
   let res;
   try {
     res = await postJson('/api/config', { key, value });
   } catch (e) {
     toast(e.message, true);
     // 拒否されたときに画面だけ変わったままにしない。
-    loadSettings();
+    if (!keepOnError) loadSettings();
     return;
   }
   const f = state.settings.fields.find((f) => f.key === key);
@@ -300,6 +308,7 @@ function fieldInput(f) {
   if (f.kind === 'bool') return boolInput(f);
   if (f.kind === 'int') return intInput(f);
   if (f.kind === 'coord') return coordInput(f);
+  if (f.kind === 'lines') return linesInput(f);
   return el('span', f.value);
 }
 
@@ -343,6 +352,19 @@ function intInput(f) {
   // 離れたとき（と Enter）だけ送る。
   input.onchange = () => setField(f.key, input.value);
   wrap.append(input, el('span', f.unit, 'unit'));
+  return wrap;
+}
+
+function linesInput(f) {
+  const wrap = el('div', '', 'lines');
+  const ta = el('textarea');
+  ta.placeholder = f.placeholder;
+  ta.value = f.value;
+  // int と同じく、打っている途中では送らず離れたときだけ送る（改行区切りの
+  // 途中状態を毎文字パースさせないため）。拒否されても打った内容を消さない
+  // （setField の doc 参照）。
+  ta.onchange = () => setField(f.key, ta.value, true);
+  wrap.append(ta);
   return wrap;
 }
 

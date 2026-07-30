@@ -55,8 +55,10 @@ USAGE:
         With --record <dir>, every payload received is recorded verbatim into
         <dir> whether or not it parses (for development; created 0700/0600).
 
-    ccsessions list [--json]
+    ccsessions list [--json] [--all]
         List the live sessions.
+        --all lists every one of them, ignoring both the `ignore` rules and the
+        max_sessions cap from config.toml.
 
     ccsessions set --session <id> --state <state> [--cwd <cwd>]
         Overwrite a session's state directly (for debugging / external producers).

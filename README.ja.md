@@ -59,10 +59,53 @@ done_ttl_secs = 180      # 完了 → アイドルに変わるまで
 session_ttl_secs = 28800 # これだけ無更新なら生き物を消す（保険。下記参照）
 max_sessions = 12
 detect_errors = false    # Stop 時に transcript を見てエラー終了も判定する（補助手段）
+
+# 一覧に出さないセッション（下記参照）
+ignore = ["~/work/tmp", "**/cron-jobs/**"]
 ```
 
 bar はキーボードフォーカスのある画面のメニューバーに出ます（外部モニタにも追従します）。
 顔を TOML で手書きする場合は [`faces/README.md`](faces/README.md) を参照してください。
+
+</details>
+
+<details>
+<summary>特定のセッションを一覧に出さない（<code>ignore</code>）</summary>
+
+定期作業用のディレクトリなど、走ってはいるが群れに出す必要のないセッションを
+畳めます。条件は何件でも書けて、**どれか 1 つに当たれば外れます**。
+
+```toml
+ignore = [
+  "~/work/tmp",        # パス。ここと、この配下のセッションが消える
+  "cron-jobs",         # 相対。どの深さでも当たる（/Users/me/cron-jobs も）
+  "**/worktrees/**",   # glob
+  "name:scratch-*",    # 表示名（cwd の末尾）に当てる
+  "title:定期*",       # Claude Code が付けたセッションタイトルに当てる
+]
+```
+
+| 書き方 | 当たるもの |
+|---|---|
+| `/Users/me/work/tmp` · `~/work/tmp` | そのディレクトリと**配下すべて**。区切りで切るので `/a/foo` は `/a/foobar` に当たりません |
+| `cron-jobs` · `work/tmp` | 先頭が `/` でなければ**どの深さでも**当たります（配下も含む）。区切りに揃うので `crontab` や `my-cron-jobs` には当たりません |
+| `**/cron-jobs/**` | glob。`*` と `?` は `/` をまたがず、`**` はまたぎます。末尾の `/**` は 0 段にも当たるので、そのディレクトリ自身も消えます |
+| `name:` · `title:` | 表示名・セッションタイトルに glob を当てます。タイトルが取れていないセッションには `title:` は当たりません |
+
+**glob を書いたらそのとおりに照合します。** `~/work/tmp/*` は直下の 1 段だけで、
+配下まで含めたければ `~/work/tmp/**` と書いてください（そうしないと `*` と `**` の
+区別が無くなるためです）。
+
+外れるのは**表示だけ**です。セッションのファイルは消えず、状態も変わりません。
+
+```sh
+ccsessions list          # ignore を効かせる。末尾に「N 件を非表示」が出ます
+ccsessions list --all    # ignore を無視して全件
+ccsessions doctor        # いま何件隠れているかを確認できます
+```
+
+書き間違えた条件はその行だけ無視して警告を出します（設定ごと既定に戻ることは
+ありません）。`ccsessions ui` からも編集できます。
 
 </details>
 
@@ -133,7 +176,7 @@ enterprise の managed settings 等でプラグインを入れられない場合
 ## CLI
 
 ```sh
-ccsessions list [--json]        # 生きているセッションの一覧
+ccsessions list [--json] [--all] # 生きているセッションの一覧（--all は ignore を無視）
 ccsessions ui                   # 設定 + 顔作りの Web UI
 ccsessions config get|set|path  # 設定の表示・変更（UI と同じ検証を通る）
 ccsessions doctor               # 診断

@@ -863,7 +863,7 @@ fn poll_loop(proxy: EventLoopProxy<AppEvent>, mut cfg: Config, demo: bool) {
         let mut list = if demo {
             flock::demo_sessions(now)
         } else {
-            store::list_live(now, cfg.session_ttl_ms(), cfg.max_sessions)
+            store::list_live(now, cfg.session_ttl_ms(), cfg.max_sessions, &cfg.ignore).shown
         };
         sort_for_display(&mut list);
         let list: Arc<[Session]> = Arc::from(list);

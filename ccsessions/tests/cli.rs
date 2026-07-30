@@ -463,3 +463,212 @@ fn list_hides_sessions_whose_process_is_gone() {
     );
     assert!(stdout.contains("clean-workdir"));
 }
+
+// ---------------------------------------------------------------------------
+// `ccsessions list` — ignore フィルタ
+// ---------------------------------------------------------------------------
+
+/// `config.toml` を tempdir に書く。**本物の `~/.config/ccsessions` には
+/// 一切触らない** — `CCSESSIONS_CONFIG` で完全に隔離する。
+fn write_config(state: &std::path::Path, ignore_patterns: &[&str]) {
+    let list = ignore_patterns
+        .iter()
+        .map(|p| format!("{p:?}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    fs::write(state.join("config.toml"), format!("ignore = [{list}]\n")).unwrap();
+}
+
+/// `write_config` に `max_sessions` も足した版。「live が `max_sessions` を
+/// 超える」場面を作る回帰テスト（`--all` の枠外し・`doctor` の stale）に要る。
+fn write_config_with_max(state: &std::path::Path, ignore_patterns: &[&str], max_sessions: usize) {
+    let list = ignore_patterns
+        .iter()
+        .map(|p| format!("{p:?}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    fs::write(
+        state.join("config.toml"),
+        format!("max_sessions = {max_sessions}\nignore = [{list}]\n"),
+    )
+    .unwrap();
+}
+
+fn list_output(state: &std::path::Path, extra_args: &[&str]) -> String {
+    let out = Command::new(bin())
+        .arg("list")
+        .args(extra_args)
+        .env("CCSESSIONS_STATE_DIR", state)
+        .env("CCSESSIONS_CONFIG", state.join("config.toml"))
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// `ignore` に当たるセッションが `ccsessions list` から消えること。
+#[test]
+fn list_hides_ignored_sessions() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let state = dir.path().join("state");
+    run_hook(
+        &state,
+        &[],
+        &payload("hidden", "UserPromptSubmit", "/tmp/cron-jobs"),
+    );
+    run_hook(
+        &state,
+        &[],
+        &payload("shown", "UserPromptSubmit", "/tmp/visible"),
+    );
+    write_config(&state, &["cron-jobs"]);
+
+    let stdout = list_output(&state, &[]);
+    assert!(stdout.contains("visible"), "{stdout:?}");
+    assert!(!stdout.contains("cron-jobs"), "{stdout:?}");
+}
+
+/// `--all` を付けると ignore を無視して全件出ること。
+#[test]
+fn list_all_shows_them_again() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let state = dir.path().join("state");
+    run_hook(
+        &state,
+        &[],
+        &payload("hidden", "UserPromptSubmit", "/tmp/cron-jobs"),
+    );
+    write_config(&state, &["cron-jobs"]);
+
+    let stdout = list_output(&state, &["--all"]);
+    assert!(stdout.contains("cron-jobs"), "{stdout:?}");
+    // `--all` のときは非表示件数の案内も出さない（全部出しているので不要）。
+    assert!(!stdout.contains("hidden by ignore"), "{stdout:?}");
+}
+
+/// 非表示にした件数が一覧の末尾に 1 行出ること。
+#[test]
+fn list_reports_how_many_were_hidden() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let state = dir.path().join("state");
+    run_hook(
+        &state,
+        &[],
+        &payload("hidden", "UserPromptSubmit", "/tmp/cron-jobs"),
+    );
+    run_hook(
+        &state,
+        &[],
+        &payload("shown", "UserPromptSubmit", "/tmp/visible"),
+    );
+    write_config(&state, &["cron-jobs"]);
+
+    let stdout = list_output(&state, &[]);
+    assert!(
+        stdout.contains("1 hidden by ignore; pass --all to show them"),
+        "{stdout:?}"
+    );
+}
+
+/// **回帰テスト。** `--all` は ignore だけでなく `max_sessions` の打ち切りも
+/// 外すこと。`max_sessions` を残したまま ignore だけ外すと、live が枠を超える
+/// 場面で `--all` を付けても隠れているセッションが永久に見えない
+/// （隠した側が新しければ、逆に `--all` を付けたぶん実セッションの表示が
+/// 減ることさえある）。
+#[test]
+fn list_all_is_not_capped_by_max_sessions() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let state = dir.path().join("state");
+    for i in 0..2 {
+        run_hook(
+            &state,
+            &[],
+            &payload(
+                &format!("hidden-{i}"),
+                "UserPromptSubmit",
+                &format!("/tmp/cron-jobs/{i}"),
+            ),
+        );
+    }
+    for i in 0..3 {
+        run_hook(
+            &state,
+            &[],
+            &payload(
+                &format!("visible-{i}"),
+                "UserPromptSubmit",
+                &format!("/tmp/visible-{i}"),
+            ),
+        );
+    }
+    // 枠を 2 に絞る。live は 5 件（ignore 対象 2 ＋ 非 ignore 3）なので枠を超える。
+    write_config_with_max(&state, &["cron-jobs"], 2);
+
+    let out = Command::new(bin())
+        .arg("list")
+        .arg("--json")
+        .arg("--all")
+        .env("CCSESSIONS_STATE_DIR", &state)
+        .env("CCSESSIONS_CONFIG", state.join("config.toml"))
+        .output()
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let sessions = parsed.as_array().expect("list --json は配列");
+    assert_eq!(
+        sessions.len(),
+        5,
+        "--all は max_sessions の打ち切りも外して全件出すべき: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// `ccsessions doctor` — ignore の回帰（stale の二重計上）
+// ---------------------------------------------------------------------------
+
+/// **doctor の回帰テスト。** ignore で外したセッションを「掃除されていない
+/// 死骸」（`stale entries`）として数えてはいけない。`live` から ignore ぶんを
+/// 差し引くだけの実装だと、ignore に当たる生きたセッションが `stale` に化けて
+/// この行が出てしまう。
+///
+/// あわせて **`max_sessions` を枠より多い live で超えさせる**（`max_sessions=2`
+/// に live 4 件）。`shown.len()` だけを引く実装だと、枠から溢れた生きている
+/// セッションまで死骸として数えられ、死骸が 1 件も無いのに `stale entries` が
+/// 出てしまう（これは `live.ignored` の足し戻しだけでは直らない）。
+#[test]
+fn an_ignored_session_is_not_counted_as_stale() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let state = dir.path().join("state");
+    run_hook(
+        &state,
+        &[],
+        &payload("hidden", "UserPromptSubmit", "/tmp/cron-jobs"),
+    );
+    for i in 0..3 {
+        run_hook(
+            &state,
+            &[],
+            &payload(
+                &format!("visible-{i}"),
+                "UserPromptSubmit",
+                &format!("/tmp/visible-{i}"),
+            ),
+        );
+    }
+    write_config_with_max(&state, &["cron-jobs"], 2);
+
+    let out = Command::new(bin())
+        .arg("doctor")
+        .env("CCSESSIONS_STATE_DIR", &state)
+        .env("CCSESSIONS_CONFIG", state.join("config.toml"))
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("stale entries"),
+        "ignore で外しただけのセッションを stale として数えてはいけない: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("ignored:"),
+        "ignore で非表示にした件数を報告するべき: {stdout:?}"
+    );
+}

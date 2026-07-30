@@ -467,6 +467,10 @@ fn config_json(paths: &Paths, lang: Lang) -> Result<Value, String> {
                 FieldKind::Coord => {
                     o.insert("kind".into(), json!("coord"));
                 }
+                FieldKind::Lines { placeholder } => {
+                    o.insert("kind".into(), json!("lines"));
+                    o.insert("placeholder".into(), json!(placeholder));
+                }
             }
             v
         })
@@ -1243,6 +1247,26 @@ mod tests {
         assert_eq!(v["states"][0]["label"], "Working");
     }
 
+    /// `ignore` は 1 行 1 条件の textarea（`FieldKind::Lines`）として届くこと。
+    /// UI の入口はここ 1 か所なので、`kind` を落とすと画面が入力欄を描けない。
+    #[test]
+    fn the_ignore_field_is_served_as_a_lines_textarea() {
+        let dir = TempDir::new().unwrap();
+        let (s, body) = get("/api/config", dir.path());
+        assert_eq!(s, 200, "{body}");
+        let v: Value = serde_json::from_str(&body).unwrap();
+
+        let fields = v["fields"].as_array().unwrap();
+        let ignore = fields.iter().find(|f| f["key"] == "ignore").unwrap();
+        assert_eq!(ignore["kind"], "lines");
+        assert!(
+            ignore["placeholder"]
+                .as_str()
+                .is_some_and(|p| !p.is_empty()),
+            "{ignore}"
+        );
+    }
+
     /// 保存すると**設定ファイルに書かれ**、次に読むとその値が返る
     /// （daemon はこのファイルの mtime を見ているので、これが反映経路そのもの）。
     #[test]
@@ -1329,6 +1353,7 @@ mod tests {
             (r#"{"key":"placement","value":"floating"}"#, "placement"),
             (r#"{"key":"design","value":"no-such-face"}"#, "design"),
             (r#"{"key":"max_sessions","value":"0"}"#, "max_sessions"),
+            (r#"{"key":"ignore","value":"~alice/x"}"#, "ignore"),
             (r#"{"key":"nope","value":"1"}"#, "nope"),
         ] {
             let (s, got) = post("/api/config", body, dir.path());
