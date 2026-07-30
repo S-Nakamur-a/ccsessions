@@ -56,7 +56,7 @@
   拒否し、どの深さでも当てたいなら `**/` を明示させる。当たらない条件を黙って
   受けるのが最悪（書いたのに何も隠れず、警告も出ない）なので、拒否して書き直し方を
   言う。番人は
-  `ignore.rs::a_relative_pattern_is_refused_and_points_at_the_double_star_form`。
+  `ignore::parse::a_relative_pattern_is_refused_and_points_at_the_double_star_form`。
 - **glob crate（`globset` / `glob` / `regex`）は足さない。** workspace の依存は
   `serde` / `serde_json` / `toml` / `libc` の 4 つだけで、版も実証済みの組み合わせに
   ピンしてある。数個の条件のために regex エンジンを引くのは釣り合わない。
