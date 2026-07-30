@@ -107,23 +107,17 @@ pub fn list() -> Vec<Session> {
     list_in(&sessions_dir())
 }
 
-/// 表示するセッションと、ignore で外した件数。
+/// 表示するセッションと、その内訳。
 ///
-/// 件数を別に返すのは、`take(max)` の前で外すため**「全部出したときとの差」を
-/// 呼び出し側が引き算で求められない**から（枠が空けば別のセッションが繰り上がる）。
+/// **`ignored` と `total` は `max` の打ち切りを受けない。** 3 つの数は
+/// `shown.len() + ignored == total` では繋がらない（`shown` だけが `max` で
+/// 切られている）ので、呼び出し側は引き算ではなくこの数をそのまま使う。
 pub struct LiveSessions {
     pub shown: Vec<Session>,
-    /// 生きていて ignore に当たった件数。**`max` の打ち切りとは無関係に、
-    /// 生きている ignore 対象を全部数える**（`shown` に入れなかった分だけ、
-    /// ではない）。イテレータの `take` に頼ると遅延評価で枠が埋まった後ろの
-    /// ignore 対象が数え落とされるので、`list_live_in` はループで両方を
-    /// 独立に数えている。
+    /// 生きていて ignore に当たった件数（`shown` から溢れた分ではない）。
     pub ignored: usize,
-    /// 生きているセッションの総数。**`max` の打ち切りも `ignore` の除外も
-    /// 受けていない生の数。** `shown.len() + ignored` では復元できない
-    /// （`shown` 自体が `max` で切られているため、両者の和は `max` を超えない）。
-    /// `doctor` の stale 計算がこれを要る — `shown` だけを引くと、max で
-    /// 溢れた生きているセッションまで「掃除されていない死骸」に数えてしまう。
+    /// 生きているセッションの総数。ignore も `max` も効かせない生の数で、
+    /// `doctor` の stale 計算が引くのはこちら。
     pub total: usize,
 }
 
@@ -133,15 +127,10 @@ pub struct LiveSessions {
 /// プロセスが居ること。**ファイルが残っていることは生きている証拠にならない**
 /// （`SessionEnd` が飛ばない終わり方があるため）。
 ///
-/// `ignore` は `config.toml` の表示フィルタ。**`is_live` の filter の後ろ・
-/// `take(max)` の前**で効かせる — あとに置くと ignore したセッションが
-/// `max` の枠を食って生きているセッションを押し出す（`take` の前に置いた
-/// 理由は `dead_sessions_do_not_consume_the_max_slots` と同じ）。
-/// `sweep` はこの判定を一切見ない — ignore は表示の都合であって、
-/// セッションが死んだという判断ではない。
-///
-/// `LiveSessions::ignored` / `LiveSessions::total` は `max` の打ち切りに
-/// 関係なく、生きているセッションを全部数える（`LiveSessions` の doc 参照）。
+/// `ignore` は `config.toml` の表示フィルタ。**死活判定の後ろ・`max` の
+/// 打ち切りの前**で効かせる — あとに置くと ignore したセッションが枠を食って
+/// 生きているセッションを押し出す（死んだセッションを枠の前で外すのと同じ理由）。
+/// `sweep` はこの判定を一切見ない。
 pub fn list_live(now: u64, session_ttl_ms: u64, max: usize, ignore: &IgnoreRules) -> LiveSessions {
     list_live_in(
         &sessions_dir(),
@@ -263,12 +252,9 @@ fn list_live_in(
     ignore: &IgnoreRules,
     alive: &dyn Fn(u32) -> bool,
 ) -> LiveSessions {
-    // 素直な for ループで書く。イテレータの `filter().take(max)` は遅延評価
-    // なので、`take` が枠を埋めた時点で残りの要素は一度も評価されず、その
-    // 後ろに並ぶ ignore 対象が `ignored` から数え落ちる（枠を超えるほど
-    // 生きたセッションがある場面は、ignore がいちばん役に立つ場面でもあり、
-    // そこで数字が壊れると実害が大きい）。`shown` と `ignored` を独立に
-    // 数えるにはループが確実。
+    // イテレータの `filter().take(max)` では書けない。`take` が枠を埋めた時点で
+    // 残りの要素は遅延評価のまま一度も見られず、その後ろに並ぶ ignore 対象が
+    // `ignored` から数え落ちる。
     let mut shown = Vec::new();
     let mut ignored = 0usize;
     let mut total = 0usize;
@@ -281,8 +267,7 @@ fn list_live_in(
             ignored += 1;
             continue;
         }
-        // ADR 0026: max の打ち切りは ignore を弾いたあと。あとに置くと
-        // ignore したセッションが枠を食って生きているセッションを押し出す。
+        // 打ち切りは ignore を弾いたあと（ADR 0026）。
         if shown.len() < max {
             shown.push(s);
         }
@@ -606,15 +591,9 @@ mod tests {
         assert_eq!(live.ignored, 1);
     }
 
-    /// **`ignored` は `max` の打ち切りと独立に数える。**
-    ///
-    /// ここを `take(max)` を含むイテレータチェーンの中で数えると、遅延評価が
-    /// 打ち切った時点で以降の要素が一度も評価されず、**枠が埋まったあとに並ぶ
-    /// ignore 対象を数え落とす**。実害は 2 つ — `ccsessions list` の
-    /// 「N 件を非表示」が過少申告になり、`doctor` の `stale` が水増しされて
-    /// 「daemon が動いていない」という誤診断が戻る。
-    ///
-    /// しかもこの条件（生きているセッションが `max` を超える）は、ignore が
+    /// 数え落とすと `ccsessions list` の「N 件を非表示」が過少申告になり、
+    /// `doctor` の `stale` が水増しされて「daemon が動いていない」という誤診断が
+    /// 戻る。しかもこの条件（生きているセッションが `max` を超える）は、ignore が
     /// いちばん役に立つ場面そのもの。
     #[test]
     fn the_ignored_count_includes_sessions_beyond_the_max_slots() {
@@ -654,11 +633,8 @@ mod tests {
         );
     }
 
-    /// `doctor` の stale 計算が要る値。`total` は `max` の打ち切りを受けない
-    /// 「生きているセッションの総数」で、`shown.len() + ignored` （枠の分しか
-    /// 残らない）では復元できない。ここが `shown.len()` のままだと、枠を
-    /// 超えて生きているセッションまで「掃除されていない死骸」として stale に
-    /// 数えられてしまう。
+    /// ここが `shown.len()` に退化すると、枠から溢れた生きているセッションまで
+    /// `doctor` の stale（掃除されていない死骸の数）に数えられる。
     #[test]
     fn the_live_total_counts_past_the_max_slots() {
         let dir = TempDir::new().unwrap();
@@ -697,11 +673,9 @@ mod tests {
         );
     }
 
-    /// 本題（[ADR 0026](../../docs/adr/0026-ignore-is-a-display-filter.md)）。
-    /// ignore したセッションのぶん `max` の枠が空くのではなく、
-    /// フィルタの後ろで打ち切ることを確かめる。フィルタを `take(max)` の後ろに
-    /// 置くと、`updated` が新しい ignore 対象 5 件が枠を食い、古い生きた
-    /// セッションが押し出されてこのテストが落ちる。
+    /// [ADR 0026](../../docs/adr/0026-ignore-is-a-display-filter.md) の本題。
+    /// フィルタを打ち切りの後ろに置くと、`updated` の新しい ignore 対象 5 件が
+    /// 枠を食い、古い生きたセッションが押し出されてここが落ちる。
     #[test]
     fn ignored_sessions_do_not_consume_the_max_slots() {
         let dir = TempDir::new().unwrap();
@@ -785,9 +759,8 @@ mod tests {
 
     // ---- sweep ------------------------------------------------------------------
 
-    /// 受け入れ条件 5: ignore は表示の都合であって、セッションの生死ではない。
-    /// `sweep_in` は ignore を引数にすら取らないので、ignore に当たる cwd で
-    /// 走っている生きたセッションのファイルは消えないままであること。
+    /// `sweep_in` は ignore を引数にすら取らない。当たる cwd で走っている
+    /// 生きたセッションのファイルが消えないことを、ここで固定しておく。
     #[test]
     fn sweep_does_not_look_at_the_ignore_list() {
         let dir = TempDir::new().unwrap();

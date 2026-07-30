@@ -1,6 +1,6 @@
 //! セッションを一覧表示から外す条件（`config.toml` の `ignore`）。
 //!
-//! **これは表示のフィルタであって、セッションの生死ではない。** ここで弾いた
+//! **これは表示のフィルタであって、セッションの生死ではない。** 弾いた
 //! セッションもファイルはそのまま残り、`store::sweep` はこの判定を一切見ない
 //! （消えるのは今までどおり pid か TTL で死んだときだけ）。`ccsessions list --all`
 //! で全件見えるのも、データを触っていないことの裏返し。
@@ -11,31 +11,29 @@
 //!
 //! # 条件の書き方
 //!
-//! **当てる相手は cwd だけ**で、書き方は 2 つしかない。
+//! 当てる相手は cwd だけで、書き方は 2 つしかない。
 //!
 //! | 書き方 | 意味 |
 //! |---|---|
-//! | `/Users/x/work/tmp` · `~/work/tmp` | ワイルドカードを含まない ＝ そのパスと**配下すべて**。**ディレクトリ境界で切る**ので `/a/foo` は `/a/foobar` に当たらない |
-//! | `~/work/tmp/**` · `**/cron-jobs/**` | glob。`*` `?` は `/` をまたがず、`**` はまたぐ |
+//! | `/Users/x/work/tmp` · `~/work/tmp` | ワイルドカード無し ＝ そのパスと配下すべて。ディレクトリ境界で切るので `/a/foo` は `/a/foobar` に当たらない |
+//! | `~/work/tmp/**` · `**/cron-jobs/**` | glob。`*` `?` は `/` をまたがず、`**` はまたぐ（gitignore / ripgrep と同じ方言） |
 //!
-//! 方言は glob の慣習どおり（gitignore / ripgrep と同じ）。**glob を書いたら
-//! そのとおりに照合する** — 「配下も含む」暗黙の拡張はワイルドカードを 1 つも
-//! 書かなかった条件にだけ与える。`~/work/tmp/*` は直下の 1 段だけで、配下まで
-//! 含めたければ `~/work/tmp/**` と書く。そうしないと `*` と `**` の区別が無くなり、
-//! glob を知っている人ほど裏切られる。
+//! glob は書いたとおりに照合する。`~/work/tmp/*` は直下の 1 段だけで、配下まで
+//! 含めたければ `**` と書く — 「配下も含む」の暗黙の拡張を glob にも与えると
+//! `*` と `**` の区別が消え、glob を知っている人ほど裏切られる。
 //!
-//! **根から書かれていない条件は受け付けない。** 照合の相手は必ず絶対パスなので、
-//! `cron-jobs` と書いても当たらない。当たらないものを黙って受けるのが一番たちが
-//! 悪く（書いたのに何も隠れず、警告も出ない）、かといって gitignore のように
-//! 「どの深さでも」と解釈すると、1 語書いただけで意図しない深さまで広く消える。
+//! 根から書かれていない条件は受け付けない。照合の相手は必ず絶対パスなので
+//! `cron-jobs` の 1 語では当たらず、当たらない条件を黙って受けるのが一番たちが
+//! 悪い（書いたのに何も隠れず、警告も出ない）。かといって gitignore のように
+//! 「どの深さでも」と解釈すると、1 語書いただけで意図しない深さまで消える。
 //! `**/cron-jobs/**` と明示させる。
 
 use std::path::Path;
 
 use crate::session::Session;
 
-/// 1 条件の長さの上限。**glob の照合は最悪 O(パターン長 × 対象長)** なので、
-/// poller が毎 tick 踏む経路に置く以上は上限を切っておく。
+/// 1 条件の長さの上限。照合は最悪 O(パターン長 × 対象長) で、poller が毎 tick
+/// 踏む経路に置く以上は上限を切っておく。
 const MAX_PATTERN_LEN: usize = 512;
 
 // ---------------------------------------------------------------------------
@@ -52,22 +50,19 @@ enum Seg {
     Pat(Vec<char>),
 }
 
-/// 条件の実体。
+/// 条件の実体（書き方はモジュール doc の表）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Matcher {
-    /// ワイルドカードを含まない条件。前方一致（セグメント単位なので自然に
-    /// ディレクトリ境界で切れる）で、配下も含む。空なら「すべて」（条件 `/`）。
+    /// セグメント単位の前方一致。空なら「すべて」（条件 `/`）。
     Prefix(Vec<String>),
-    /// glob。書いたとおりに照合する。
     Glob(Vec<Seg>),
 }
 
 /// 一覧から外す条件 1 つ。
 ///
-/// 書かれた原文（`raw`）を持ち続けるのは、設定画面が「読んだ値を書き戻すと元に
-/// 戻る」を保証しているため（`config::field_value` → `config::set_field`）。
-/// 展開後のパスを書き戻すと、`~/work` と書いた設定が保存のたびに
-/// `/Users/x/work` へ化ける。
+/// 展開後のパスではなく書かれた原文（`raw`）を持ち続ける。展開後を持つと、
+/// 設定画面が読んだ値を書き戻すたびに `~/work` が `/Users/x/work` へ化ける
+/// （`config::field_value` → `config::set_field`）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IgnorePattern {
     raw: String,
@@ -91,10 +86,9 @@ impl IgnorePattern {
         if trimmed.is_empty() {
             return Err("ignore: an empty rule is not allowed".to_string());
         }
-        // **制御文字は入口で弾く。** パスの条件に紛れ込むのは常に事故（色付き
-        // 出力からのコピペで ESC が混ざる等）で、通しても当たらない。加えて、
-        // 通すと設定ファイルの書き出しが TOML の基本文字列の禁止文字に触れる
-        // ため、`config::toml_escape` と二重に閉じておく。
+        // 制御文字が条件に紛れ込むのは常に事故（色付き出力からのコピペで ESC が
+        // 混ざる等）で、通しても当たらない。書き出しの側でも `config::toml_escape`
+        // が逃がすが、入口でも弾いて二重に閉じておく。
         if let Some(c) = trimmed.chars().find(|c| c.is_control()) {
             return Err(format!(
                 "ignore: the rule contains a control character (U+{:04X}): {trimmed:?}",
@@ -118,7 +112,7 @@ impl IgnorePattern {
     pub fn matches(&self, s: &Session) -> bool {
         match &self.matcher {
             Matcher::Prefix(p) => path_prefix_matches(p, &s.cwd),
-            // 文字列→文字列への変換はここで 1 回だけ行う。`match_segments` の中で
+            // 文字列→`char` の変換はここで 1 回だけ行う。`match_segments` の中で
             // やるとバックトラックのたびに同じセグメントを変換し直す。
             Matcher::Glob(segs) => {
                 let cwd: Vec<Vec<char>> = split_path(&s.cwd)
@@ -138,17 +132,15 @@ fn path_matcher(body: &str, home: &Path) -> Result<Matcher, String> {
         return Err("ignore: an empty rule is not allowed".to_string());
     }
     let segs = split_path(&expanded);
-    // **`.` / `..` は弾く。** 通すとセグメント比較で永久に不一致になり、
-    // 「書いたのに何も隠れないが、警告も出ない」という一番たちの悪い形になる
-    // （実在の cwd に `.` セグメントは現れない）。
+    // 実在の cwd に `.` / `..` セグメントは現れないので、通しても永久に不一致。
     if let Some(dot) = segs.iter().find(|s| **s == "." || **s == "..") {
         return Err(format!(
             "ignore: cannot resolve {dot:?} in {body:?} (write an absolute path, or one \
              starting with `~/`)"
         ));
     }
-    // **根から書かれていない条件も弾く**（モジュール doc 参照）。`**` 始まりは
-    // 「どの深さでも」を明示して書いた形なので通す。
+    // `**` 始まりは「どの深さでも」を明示して書いた形なので、根から書かれて
+    // いなくても通す。
     if !expanded.starts_with('/') && segs.first() != Some(&"**") {
         return Err(format!(
             "ignore: {body:?} is not anchored at the root (start it with `/` or `~/`, or \
@@ -156,8 +148,6 @@ fn path_matcher(body: &str, home: &Path) -> Result<Matcher, String> {
         ));
     }
 
-    // ワイルドカードが無ければパスとして扱う。「配下も含む前方一致」は、glob を
-    // 書いていない条件にだけ与える暗黙の拡張（モジュール doc 参照）。
     if !expanded.contains('*') && !expanded.contains('?') {
         return Ok(Matcher::Prefix(
             segs.into_iter().map(str::to_string).collect(),
@@ -202,7 +192,7 @@ fn expand_home(body: &str, home: &Path) -> Result<String, String> {
 // 条件の束
 // ---------------------------------------------------------------------------
 
-/// 一覧から外す条件の束。**いずれか 1 つに当たれば外す。**
+/// 一覧から外す条件の束。いずれか 1 つに当たれば外す。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IgnoreRules {
     patterns: Vec<IgnorePattern>,
@@ -212,9 +202,9 @@ impl IgnoreRules {
     /// 1 条件ずつパースし、**壊れた条件はその行だけ捨てて理由を返す**。
     ///
     /// 全体を `Err` にしないのは、打ち間違い 1 つで設定ごと既定へ落ちるのを
-    /// 避けるため（daemon は `config::load` が `Err` を返すと last-good か
-    /// 組込みデフォルトへ落ちるので、他の設定変更まで巻き添えになる）。
-    /// 呼び出し側（`config::load`）が理由をログに出す。
+    /// 避けるため — daemon は `config::load` が `Err` を返すと last-good か
+    /// 組込みデフォルトへ落ちるので、無関係な設定変更まで巻き添えになる。
+    /// 捨てた理由は呼び出し側（`config::load`）がログに出す。
     pub fn parse_lines_in<S: AsRef<str>>(lines: &[S], home: &Path) -> (Self, Vec<String>) {
         let mut patterns = Vec::new();
         let mut errors = Vec::new();
@@ -231,8 +221,7 @@ impl IgnoreRules {
     ///
     /// **1 件も無ければホームディレクトリを見に行かない。** `crate::home_dir()` は
     /// 解決できなければ panic するので、`ignore` を書いていない設定を読むだけの
-    /// 経路（hook を含む）に panic 面を増やさないため。hook は何があっても
-    /// exit 0 で終わらなければならない。
+    /// 経路（hook を含む）に panic 面を増やさない。hook は何があっても exit 0。
     pub fn parse_lines<S: AsRef<str>>(lines: &[S]) -> (Self, Vec<String>) {
         if lines.is_empty() {
             return (Self::default(), Vec::new());
@@ -268,11 +257,8 @@ fn split_path(p: &str) -> Vec<&str> {
     p.split('/').filter(|s| !s.is_empty()).collect()
 }
 
-/// 前方一致。**セグメント単位で比べる**ので、`/a/foo` は `/a/foobar` に当たらず、
-/// 区切りの重複（`/a//foo`）や末尾の `/` も自然に吸収される。
-///
-/// `prefix` が空（条件が `/`）なら「すべて」。書けてしまう以上、当たると
-/// 決めておく方が説明しやすい。
+/// 前方一致。セグメント単位で比べるので、区切りの重複（`/a//foo`）や末尾の `/` も
+/// 自然に吸収される。`prefix` が空（条件が `/`）なら「すべて」に当たる。
 fn path_prefix_matches(prefix: &[String], cwd: &str) -> bool {
     let segs = split_path(cwd);
     prefix.len() <= segs.len() && prefix.iter().zip(&segs).all(|(a, b)| a == b)
@@ -281,7 +267,7 @@ fn path_prefix_matches(prefix: &[String], cwd: &str) -> bool {
 /// セグメント列どうしの照合。`**` は 0 段以上に当たる。
 ///
 /// **2 ポインタ法**（`**` の戻り先を 1 つだけ覚える）で書く。素朴な再帰だと
-/// `**/a/**/a/**/b` のような条件で段数に対して指数時間になる。
+/// `**/a/**/a/**/b` のような条件が指数時間になり、poller が毎 tick 踏む。
 fn match_segments(pats: &[Seg], texts: &[Vec<char>]) -> bool {
     let (mut p, mut t) = (0usize, 0usize);
     // `star` は直近の `**` の位置、`mark` はそこで消費を再開する位置。
@@ -314,9 +300,7 @@ fn match_segments(pats: &[Seg], texts: &[Vec<char>]) -> bool {
 }
 
 /// 1 段ぶんの glob。`*` は 0 文字以上、`?` はちょうど 1 文字。`/` は現れない。
-///
-/// こちらも 2 ポインタ法。`a*a*a*a*a*b` のような条件を素朴な再帰で書くと
-/// 指数時間になり、設定ファイル経由とはいえ poller が毎 tick 踏む。
+/// 文字単位で見るだけで、構造は `match_segments` と同じ 2 ポインタ法。
 fn glob_chars(pat: &[char], text: &[char]) -> bool {
     let (mut p, mut t) = (0usize, 0usize);
     let (mut star, mut mark) = (usize::MAX, 0usize);
@@ -393,8 +377,8 @@ mod tests {
         assert!(hits("/a/foo", "/a/foo/b/c"));
     }
 
-    /// **前方一致はディレクトリ境界で切る。** ここを文字列の `starts_with` だけで
-    /// 書くと、`/a/foo` を無視したつもりで `/a/foobar` まで消える。
+    /// 前方一致を文字列の `starts_with` で書くと、`/a/foo` を無視したつもりで
+    /// `/a/foobar` まで消える。
     #[test]
     fn a_plain_path_does_not_match_a_longer_sibling_name() {
         assert!(!hits("/a/foo", "/a/foobar"));
@@ -445,16 +429,14 @@ mod tests {
         assert!(hits("**/cron-jobs/**", "/Users/x/cron-jobs/a/b/c"));
     }
 
-    /// **末尾の `/**` は 0 段にも当たる。** そうしないと
-    /// 「ディレクトリごと畳む」つもりで書いた条件が、そのディレクトリ自身に
-    /// 走っているセッションだけ取りこぼす。
+    /// 0 段に当たらないと、「ディレクトリごと畳む」つもりで書いた条件が、
+    /// そのディレクトリ自身で走っているセッションだけ取りこぼす。
     #[test]
     fn a_trailing_double_star_also_matches_the_directory_itself() {
         assert!(hits("**/cron-jobs/**", "/Users/x/cron-jobs"));
     }
 
-    /// **`*` は `/` をまたがない**（glob の慣習どおり）。ここが崩れると `*` と
-    /// `**` の区別が消える。
+    /// ここが崩れると `*` と `**` の区別が消える。
     #[test]
     fn a_single_star_does_not_cross_separators() {
         assert!(hits("~/work/tmp/*", "/Users/tester/work/tmp/a"));
@@ -469,9 +451,8 @@ mod tests {
         assert!(!hits("/a/*/tmp", "/a/tmp"));
     }
 
-    /// **対象の側に `*` が実在しても壊れない。** glob の判定をリテラル一致より
-    /// あとに置くと、`*` を「たまたま同じ文字」として消費して戻り先を覚えず、
-    /// `a*` が `a*b` に当たらなくなる。
+    /// `glob_chars` が `*` をリテラル一致より先に判定していることの番人
+    /// （順序を逆にすると何が起きるかは同関数のコメント）。
     #[test]
     fn a_star_in_the_path_itself_does_not_confuse_the_matcher() {
         assert!(hits("/a/x*", "/a/x*y"));
@@ -494,7 +475,6 @@ mod tests {
         assert!(!hits("/x/?", "/x/定期"));
     }
 
-    /// **glob は書いたとおり。** 配下まで含めたければ `**` を書く。
     #[test]
     fn a_glob_is_not_silently_extended_to_the_subtree() {
         assert!(hits("**/cron-*", "/Users/x/cron-jobs"));
@@ -514,9 +494,8 @@ mod tests {
         }
     }
 
-    /// **相対の条件は弾く。** 照合の相手は必ず絶対パスなので当たらない。黙って
-    /// 受けると「書いたのに何も隠れず、警告も出ない」になり、gitignore のように
-    /// 「どの深さでも」と解釈すると 1 語で意図せず広く消える。`**/` を明示させる。
+    /// 弾く理由はモジュール doc。ここが固定するのは、エラーが書き直し方
+    /// （`**/`）まで言うこと — 言わないと「なぜ通らないのか」で詰む。
     #[test]
     fn a_relative_pattern_is_refused_and_points_at_the_double_star_form() {
         for src in ["cron-jobs", "work/tmp", "cron-*", "*foo*"] {
@@ -529,8 +508,8 @@ mod tests {
         assert!(IgnorePattern::parse_in("**/*foo*/**", &home()).is_ok());
     }
 
-    /// **制御文字は入口で弾く。** 通すと当たらないうえ、設定ファイルの
-    /// 書き出しが TOML の禁止文字に触れる（`config::toml_escape` と二重に閉じる）。
+    /// TOML の基本文字列が生では許さない範囲まで含めて弾くこと
+    /// （書き出し側の `config::toml_escape` と二重に閉じている）。
     #[test]
     fn a_pattern_containing_a_control_character_is_refused() {
         for c in ['\u{1B}', '\u{00}', '\u{0B}', '\u{7F}', '\n'] {
@@ -541,8 +520,7 @@ mod tests {
         }
     }
 
-    /// **`.` / `..` は弾く。** 通すとセグメント比較で永久に不一致になり、
-    /// 「書いたのに何も隠れないが警告も出ない」という一番たちの悪い形になる。
+    /// 通すと永久に不一致 ＝ 「書いたのに何も隠れず、警告も出ない」になる。
     #[test]
     fn a_dot_segment_is_refused_instead_of_silently_never_matching() {
         for src in ["./cron-jobs", "../x", "/a/./b", "~/x/../y"] {
@@ -586,8 +564,7 @@ mod tests {
         assert!(p.matches(&session("/a/foo/b")));
     }
 
-    /// **原文を保つ。** 展開後のパスを保存し直すと、`~/work` と書いた設定が
-    /// 保存のたびに `/Users/tester/work` へ化ける。
+    /// 展開後を保存し直すと、`~/work` が保存のたびに `/Users/tester/work` へ化ける。
     #[test]
     fn the_written_form_is_preserved_for_round_tripping() {
         for src in ["~/work/tmp", "**/cron-jobs/**", "/a/foo"] {
@@ -607,8 +584,6 @@ mod tests {
         assert!(!rules.matches(&session("/Users/x/proj")));
     }
 
-    /// **壊れた条件はその行だけ捨てる。** 打ち間違い 1 つで設定ごと既定へ
-    /// 落とさないための保証。
     #[test]
     fn a_broken_pattern_is_dropped_and_the_rest_still_applies() {
         let (rules, errors) = IgnoreRules::parse_lines_in(&["~alice/x", "/a/foo", ""], &home());
@@ -626,8 +601,8 @@ mod tests {
 
     // ---- 計算量 ---------------------------------------------------------------
 
-    /// **素朴な再帰だと指数時間になる条件**が、実用時間で返ること。
-    /// poller が毎 tick 踏む経路なので、ここが崩れると常駐が固まる。
+    /// 素朴な再帰だと指数時間になる条件。poller が毎 tick 踏む経路なので、
+    /// ここが崩れると常駐が固まる。
     #[test]
     fn a_pathological_glob_still_returns_quickly() {
         let start = std::time::Instant::now();

@@ -31,11 +31,9 @@ pub fn run() -> i32 {
     // （掃除するのは常駐している ccsessionsd の役目なので、差が減らないままなら
     //  daemon が動いていないというサインになる）。
     //
-    // 引くのは `live.total`（生きているセッションの総数。max の打ち切りも
-    // ignore の除外も受けていない）。`live.shown.len()` だけを引くと、
-    // ignore で外したセッションだけでなく、`max_sessions` の枠から溢れた
-    // 生きているセッションまで「掃除されていない死骸」に数えてしまう
-    // （どちらも生死の判断ではなく表示側の都合）。
+    // 引くのは `live.shown.len()` ではなく `live.total`。表示から外れた理由
+    // （ignore・`max_sessions`）はどちらも生死の判断ではないので、引くと生きて
+    // いるセッションを死骸に数えてしまう。
     let stale = store::list().len().saturating_sub(live.total);
 
     // Claude Code の設定は複数ファイルに分かれて同居しうる（ユーザ全体・

@@ -6,10 +6,9 @@ use ccsessions_core::{config, lang, now_ms, store};
 pub fn run(args: &[String]) -> i32 {
     let json = args.iter().any(|a| a == "--json");
     // `--all` は「表示を絞る条件を全部外す」意図なので、ignore だけでなく
-    // `max_sessions` の打ち切りも外す。max はそのままにすると、生きている
-    // セッションが枠を超えたときに ignore 対象が枠を食って、`--all` を付けても
-    // 素の一覧に出ていたセッションが逆に消えることがある（`--json` にも効く。
-    // JSON の形は配列のままで変えない — 既存の契約を壊さないため）。
+    // `max_sessions` の打ち切りも外す。max を残すと、生きているセッションが枠を
+    // 超えたときに ignore 対象が枠を食って、`--all` を付けたほうが素の一覧より
+    // 表示が減ることがある。`--json` にも効くが、JSON の形は配列のまま変えない。
     let all = args.iter().any(|a| a == "--all");
 
     let cfg = config::load(&ccsessions_core::config_path()).unwrap_or_else(|e| {
@@ -65,9 +64,8 @@ pub fn run(args: &[String]) -> i32 {
     0
 }
 
-/// ignore で外した件数の 1 行。`--all` のとき・0 件のときは何も出さない
-/// （`--all` を渡せば `ignore` を無視するので `ignored` は常に 0 になり、
-/// この条件はどちらの意味でも同じ結果になる）。
+/// ignore で外した件数の 1 行。0 件のときは何も出さない（`--all` なら `ignored`
+/// は常に 0 なので、`all` の判定は念のため）。
 fn print_hidden_count(all: bool, ignored: usize) {
     if !all && ignored > 0 {
         println!("({ignored} hidden by ignore; pass --all to show them)");

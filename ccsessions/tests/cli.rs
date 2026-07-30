@@ -569,11 +569,8 @@ fn list_reports_how_many_were_hidden() {
     );
 }
 
-/// **回帰テスト。** `--all` は ignore だけでなく `max_sessions` の打ち切りも
-/// 外すこと。`max_sessions` を残したまま ignore だけ外すと、live が枠を超える
-/// 場面で `--all` を付けても隠れているセッションが永久に見えない
-/// （隠した側が新しければ、逆に `--all` を付けたぶん実セッションの表示が
-/// 減ることさえある）。
+/// **回帰テスト。** `max_sessions` を残したまま ignore だけ外すと、live が枠を
+/// 超える場面で「隠したものを見る唯一の手段」が機能しなくなる。
 #[test]
 fn list_all_is_not_capped_by_max_sessions() {
     let dir = tempfile::TempDir::new().unwrap();
@@ -625,15 +622,11 @@ fn list_all_is_not_capped_by_max_sessions() {
 // `ccsessions doctor` — ignore の回帰（stale の二重計上）
 // ---------------------------------------------------------------------------
 
-/// **doctor の回帰テスト。** ignore で外したセッションを「掃除されていない
-/// 死骸」（`stale entries`）として数えてはいけない。`live` から ignore ぶんを
-/// 差し引くだけの実装だと、ignore に当たる生きたセッションが `stale` に化けて
-/// この行が出てしまう。
-///
-/// あわせて **`max_sessions` を枠より多い live で超えさせる**（`max_sessions=2`
-/// に live 4 件）。`shown.len()` だけを引く実装だと、枠から溢れた生きている
-/// セッションまで死骸として数えられ、死骸が 1 件も無いのに `stale entries` が
-/// 出てしまう（これは `live.ignored` の足し戻しだけでは直らない）。
+/// **doctor の回帰テスト。** 死骸が 1 件も無いのに `stale entries` が出ては
+/// いけない。ここは 2 つの実装ミスを同時に踏ませる — `max_sessions = 2` に
+/// live 4 件（うち ignore 2 件）なので、ignore ぶんを引き忘れても、`total` の
+/// 代わりに `shown.len()` を引いても行が出る。後者は `ignored` の足し戻し
+/// だけでは直らない。
 #[test]
 fn an_ignored_session_is_not_counted_as_stale() {
     let dir = tempfile::TempDir::new().unwrap();
