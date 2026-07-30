@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="624" height="64" viewBox="0 0 624 64" role="img" aria-label="ccsessions の 6 状態: 作業中・判断待ち・エージェント待ち・アイドル・完了・エラー">
-<title>ccsessions — 6 つの状態</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="624" height="64" viewBox="0 0 624 64" role="img" aria-label="The six ccsessions states: working, needs you, agents running, idle, done, error">
+<title>ccsessions — the six states</title>
 <rect width="624" height="64" rx="8" fill="#0b0912"/>
 <svg x="32" y="6" width="39" height="36" viewBox="0 0 39 36">
 
@@ -11,7 +11,7 @@
   <text x="24.000" y="-2.000" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="#00e1e2" text-anchor="middle">›</text>
 </g>
 </svg>
-<text x="52" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">作業中</text>
+<text x="52" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">Working</text>
 <svg x="136" y="6" width="39" height="36" viewBox="0 0 39 36">
 
 
@@ -22,7 +22,7 @@
   <text x="24.000" y="-2.000" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="#fbc044" text-anchor="middle">!</text>
 </g>
 </svg>
-<text x="156" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">判断待ち</text>
+<text x="156" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">Needs you</text>
 <svg x="240" y="6" width="39" height="36" viewBox="0 0 39 36">
 
 
@@ -33,7 +33,7 @@
   <text x="24.000" y="-2.000" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="#9c95fe" text-anchor="middle">⋯</text>
 </g>
 </svg>
-<text x="260" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">エージェント待ち</text>
+<text x="260" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">Agents running</text>
 <svg x="344" y="6" width="39" height="36" viewBox="0 0 39 36">
 
 
@@ -44,7 +44,7 @@
   <text x="24.000" y="-2.000" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="#79818d" text-anchor="middle">z</text>
 </g>
 </svg>
-<text x="364" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">アイドル</text>
+<text x="364" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">Idle</text>
 <svg x="448" y="6" width="39" height="36" viewBox="0 0 39 36">
 
 
@@ -55,7 +55,7 @@
   <text x="24.000" y="-2.000" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="#60db89" text-anchor="middle">✓</text>
 </g>
 </svg>
-<text x="468" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">完了</text>
+<text x="468" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">Done</text>
 <svg x="552" y="6" width="39" height="36" viewBox="0 0 39 36">
 
 
@@ -66,5 +66,5 @@
   <text x="24.000" y="-2.000" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" font-weight="700" fill="#dc5e59" text-anchor="middle">×</text>
 </g>
 </svg>
-<text x="572" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">エラー</text>
+<text x="572" y="54" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Hiragino Sans,sans-serif" font-size="11" fill="#8b8794">Error</text>
 </svg>

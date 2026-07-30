@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::lang::{l, Lang};
+
 /// セッションの見た目上の状態。元デザインの 6 状態にそのまま対応する。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -58,16 +60,23 @@ impl SessionState {
         }
     }
 
-    /// 日本語ラベル（ホバーカード表示用）。
-    pub fn ja(&self) -> &'static str {
+    /// 画面に出す状態名。ホバーカード・`ccsessions list`・設定画面が同じものを使う。
+    ///
+    /// 桁揃えする側（`ccsessions list`）が幅を決められるよう、英語は
+    /// 一番長いものでも 14 文字（"Agents running"）に収めてある。
+    ///
+    /// 英語は README の状態図（`docs/assets/states.svg`）と同じ語にしてある
+    /// （図を見てから設定画面を開いた人が、同じ語を探せるように）。
+    pub fn label(&self, lang: Lang) -> &'static str {
         match self {
-            SessionState::Working => "作業中",
-            SessionState::WaitUser => "判断待ち",
-            SessionState::WaitAgent => "エージェント待ち",
-            SessionState::Idle => "アイドル",
-            SessionState::Done => "完了",
-            SessionState::Error => "エラー",
+            SessionState::Working => l("作業中", "Working"),
+            SessionState::WaitUser => l("判断待ち", "Needs you"),
+            SessionState::WaitAgent => l("エージェント待ち", "Agents running"),
+            SessionState::Idle => l("アイドル", "Idle"),
+            SessionState::Done => l("完了", "Done"),
+            SessionState::Error => l("エラー", "Error"),
         }
+        .get(lang)
     }
 
     /// 右上に出すグリフ文字。
@@ -292,6 +301,33 @@ mod tests {
     fn as_str_round_trips_through_from_str() {
         for s in SessionState::ORDER {
             assert_eq!(SessionState::from_str(s.as_str()), Some(s));
+        }
+    }
+
+    #[test]
+    fn every_state_is_named_in_both_languages() {
+        for s in SessionState::ORDER {
+            for lang in [Lang::Ja, Lang::En] {
+                assert!(!s.label(lang).is_empty(), "{s:?} に {lang:?} の名前が無い");
+            }
+        }
+    }
+
+    /// `ccsessions list` は状態名の列を固定幅で揃える。**一番長い英語の名前が
+    /// その幅に収まっていること** — はみ出すと右隣のセッション名の列が押し出され、
+    /// 行ごとに桁がずれる（日本語だけ見て幅を決めると必ず踏む）。
+    #[test]
+    fn no_state_name_overflows_the_list_column() {
+        const LIST_COLUMN: usize = 14;
+        for s in SessionState::ORDER {
+            for lang in [Lang::Ja, Lang::En] {
+                let n = s.label(lang).chars().count();
+                assert!(
+                    n <= LIST_COLUMN,
+                    "{:?} は {n} 文字で、list の {LIST_COLUMN} 桁に収まらない",
+                    s.label(lang)
+                );
+            }
         }
     }
 

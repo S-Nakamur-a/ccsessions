@@ -1,6 +1,6 @@
 //! ホバーカード — 生き物にカーソルを乗せたときに出る詳細パネル。
 //!
-//! 1 行目: セッション名 / 状態（日本語）/ 経過時間（右寄せ）
+//! 1 行目: セッション名 / 状態（設定の言語）/ 経過時間（右寄せ）
 //! 2 行目: セッションタイトル（**あるときだけ**。無ければこの行ごと出ない）
 //! 以降: そのセッションが走らせている agent（状態ドット + 名前 + 役割）
 //!
@@ -23,7 +23,13 @@ pub struct CardView {
     pub name: String,
     /// Claude Code のセッションタイトル。無いセッションもある（`Session::title`）。
     pub title: Option<String>,
+    /// 状態そのもの。**色を引くために持つ**（`theme::accent`）。
     pub state: SessionState,
+    /// 画面に出す状態名。**言語はここで解決済み**にしてある。
+    ///
+    /// 描画の奥まで設定を持ち回らずに済み、`CardView` の比較（`PartialEq`）だけで
+    /// 「言語が変わったから作り直す」も自然に効く。解決するのは `flock::card_view_of`。
+    pub state_label: &'static str,
     pub dur: String,
     pub agents: Vec<AgentRow>,
 }
@@ -55,7 +61,7 @@ pub fn build(v: &CardView, size: Size, scale: f64, reduce_motion: bool) -> Card 
 
     // --- 大きさを見積もる -------------------------------------------------
     let name_w = text_width(&v.name, theme::CARD_TITLE_FONT);
-    let ja_w = text_width(v.state.ja(), theme::CARD_JA_FONT);
+    let ja_w = text_width(v.state_label, theme::CARD_JA_FONT);
     let dur_w = text_width(&v.dur, theme::CARD_DUR_FONT);
     let title_w = name_w + TITLE_GAP + ja_w + DUR_GAP + dur_w;
 
@@ -132,7 +138,14 @@ pub fn build(v: &CardView, size: Size, scale: f64, reduce_motion: bool) -> Card 
     ));
     layer.addSublayer(&name_l);
 
-    let ja_l = text_layer(v.state.ja(), theme::CARD_JA_FONT, accent, 1.0, false, scale);
+    let ja_l = text_layer(
+        v.state_label,
+        theme::CARD_JA_FONT,
+        accent,
+        1.0,
+        false,
+        scale,
+    );
     ja_l.setFrame(rect(
         theme::CARD_PAD_X + name_w + TITLE_GAP,
         title_y - 0.5,

@@ -16,10 +16,31 @@ use objc2::runtime::AnyObject;
 use objc2_app_kit::{NSColor, NSFont, NSFontWeightBold, NSFontWeightMedium};
 use objc2_core_foundation::{CFRetained, CFType};
 use objc2_core_graphics::{CGColor, CGMutablePath, CGPath};
-use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{NSLocale, NSPoint, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CATextLayer};
 
 use crate::theme::{Outline, Rgb, Seg};
+
+// ---------------------------------------------------------------------------
+// ロケール
+// ---------------------------------------------------------------------------
+
+/// OS の言語タグ（`"ja-JP"` 等）。取れなければ `None`。
+///
+/// **CLI と違い環境変数は見ない。** launchd から起動される常駐は `LANG` を
+/// 継承しないので、`brew services` 経由では常に取れないことになる。
+///
+/// `NSBundle::preferredLocalizations` ではなく
+/// `NSLocale::preferredLanguages` を使う: 前者はアプリが同梱している
+/// `.lproj` との交差なので、ローカライズを 1 つも同梱していないこのバイナリでは
+/// 常に開発言語だけを返す。欲しいのは**ユーザが「システム設定 > 言語と地域」で
+/// 並べた希望**そのもの。
+pub fn os_language_tag() -> Option<String> {
+    NSLocale::preferredLanguages()
+        .iter()
+        .next()
+        .map(|s| s.to_string())
+}
 
 // ---------------------------------------------------------------------------
 // 幾何・色・文字列

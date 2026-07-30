@@ -391,7 +391,15 @@ fn notes_of(cfg: &CharacterConfig) -> Vec<String> {
     )];
     let list: Vec<String> = parts::LINES
         .iter()
-        .map(|c| format!("{}: {}", c.label, parts::line_part(c, cfg.part(c.id)).label))
+        // パーツ名は日本語しか無い（画面に出さないので訳していない）。この行は
+        // 生成した TOML の先頭コメントなので、カテゴリ名も日本語側で揃える。
+        .map(|c| {
+            format!(
+                "{}: {}",
+                c.label.ja,
+                parts::line_part(c, cfg.part(c.id)).label
+            )
+        })
         .collect();
     v.push(list.join(" / "));
     v

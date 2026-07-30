@@ -10,11 +10,56 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::lang::{self, l, Lang, L};
 use crate::write_atomic;
 
 // ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
+
+/// 画面に出す文言の言語。**設定値なので `auto` を持つ**（描画側が扱う
+/// [`Lang`] は解決済みで `auto` を持たない）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Language {
+    /// OS（daemon）・ブラウザ（Web UI）・環境変数（CLI）の言語に従う。
+    Auto,
+    Ja,
+    En,
+}
+
+impl Language {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Language::Auto => "auto",
+            Language::Ja => "ja",
+            Language::En => "en",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "auto" => Some(Language::Auto),
+            "ja" => Some(Language::Ja),
+            "en" => Some(Language::En),
+            _ => None,
+        }
+    }
+
+    /// 設定値と、その層が観測した言語タグから表示言語を決める。
+    ///
+    /// タグの出どころは層ごとに違う（daemon は `NSLocale`、Web UI は
+    /// `Accept-Language`、CLI は環境変数 `LANG`）。**取れなかったときは英語**
+    /// — 日本語だと確信できるときだけ日本語にする、という `lang::from_tag` の
+    /// 判断をそのまま引き継ぐ。
+    pub fn resolve(&self, os_tag: Option<&str>) -> Lang {
+        match self {
+            Language::Ja => Lang::Ja,
+            Language::En => Lang::En,
+            Language::Auto => os_tag.map(lang::from_tag).unwrap_or(Lang::En),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Placement {
@@ -140,6 +185,10 @@ impl CompactMode {
 /// 公開する。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
+    /// 画面に出す文言の言語。**診断（`ccsessions doctor`）と顔の検証メッセージは
+    /// 英語固定**なので、これが効くのは設定画面・ビルダー・ホバーカード・
+    /// `ccsessions list` の状態名だけ。
+    pub language: Language,
     pub placement: Placement,
     /// 使う顔の id。**ここでは実在を検証しない**。
     ///
@@ -207,6 +256,8 @@ impl Config {
 // Built-in default
 // ---------------------------------------------------------------------------
 
+/// 既定は `auto`（OS の言語に追従）。日本語環境では今までどおり日本語で出る。
+const DEFAULT_LANGUAGE: &str = "auto";
 const DEFAULT_PLACEMENT: &str = "bar";
 const DEFAULT_DESIGN: &str = "egg";
 const DEFAULT_REDUCE_MOTION: bool = false;
@@ -231,6 +282,7 @@ const DEFAULT_DETECT_ERRORS: bool = false;
 /// `config.toml` が無いときに使う組込みデフォルト。
 pub fn builtin_default() -> Config {
     Config {
+        language: Language::Auto,
         placement: Placement::Bar,
         design: DEFAULT_DESIGN.to_string(),
         reduce_motion: DEFAULT_REDUCE_MOTION,
@@ -286,17 +338,19 @@ pub fn save(path: &Path, c: &Config) -> io::Result<()> {
 /// 表示するだけ」を実装するのにもそのまま使えるので公開している。
 pub fn render_toml(c: &Config) -> String {
     let mut out = format!(
-        r#"placement = "{placement}"          # "bar" | "dock"
+        r#"language = "{language}"            # "auto" (follow the OS) | "ja" | "en"
+placement = "{placement}"          # "bar" | "dock"
 design = "{design}"                # {choices}
 reduce_motion = {reduce_motion}
 show_glyphs = {show_glyphs}
 bar_align = "{bar_align}"          # "auto" | "center" | "left-of-notch" | "right-of-notch"
-compact_flock = "{compact_flock}"  # "auto"（入り切らなければ縮める）| "always" | "never"
+compact_flock = "{compact_flock}"  # "auto" (shrink once they no longer fit) | "always" | "never"
 done_ttl_secs = {done_ttl_secs}
 session_ttl_secs = {session_ttl_secs}
 max_sessions = {max_sessions}
 detect_errors = {detect_errors}
 "#,
+        language = c.language.as_str(),
         placement = c.placement.as_str(),
         design = c.design,
         choices = design_choices(),
@@ -317,8 +371,9 @@ detect_errors = {detect_errors}
     // `{}`（Display）は 687.0 を `687` と書いてしまい、TOML 上は整数になる。
     if c.dock_x.is_some() || c.dock_y.is_some() {
         out.push_str(
-            "\n# dock をドラッグして決めた位置（パネル中心の x / 下端の y、画面左下が原点）。\n\
-             # 既定の「画面下部中央」へ戻すには、この行を消すか `ccsessions config set dock_x auto`。\n",
+            "\n# Where the dock was dragged to (x = panel centre, y = bottom edge; origin is\n\
+             # the bottom-left of the screen). To go back to the default (bottom centre),\n\
+             # delete these lines or run `ccsessions config set dock_x auto`.\n",
         );
         if let Some(x) = c.dock_x {
             out.push_str(&format!("dock_x = {x:?}\n"));
@@ -345,16 +400,19 @@ detect_errors = {detect_errors}
 // `Config` の定義・`RawConfig`・`render_toml`・この表だけになる。
 
 /// 設定 1 項目の型。UI はこれを見て入力欄の形を決める。
+///
+/// 人が読む文字列は**すべて [`L`]（対訳のペア）**で持つ。片方の言語だけ書いた
+/// 状態はコンパイルが通らないので、項目を足したときの訳し忘れがビルドで落ちる。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldKind {
     /// 固定の選択肢（値, 表示ラベル）。
-    Choice(&'static [(&'static str, &'static str)]),
+    Choice(&'static [(&'static str, L)]),
     Bool,
     /// 非負整数。範囲は**書くときだけ**見る（読み込みは既存の値を尊重する）。
     Int {
         min: u64,
         max: u64,
-        unit: &'static str,
+        unit: L,
     },
     /// 顔の id。選択肢はレジストリ（組込み + ユーザ顔）なので、ここには持たない。
     Face,
@@ -366,115 +424,179 @@ pub enum FieldKind {
 #[derive(Debug, Clone, Copy)]
 pub struct FieldSpec {
     pub key: &'static str,
-    pub label: &'static str,
+    pub label: L,
     pub kind: FieldKind,
-    pub help: &'static str,
+    pub help: L,
 }
 
-const PLACEMENT_CHOICES: &[(&str, &str)] = &[("bar", "メニューバー"), ("dock", "ドック（画面下）")];
-
-const BAR_ALIGN_CHOICES: &[(&str, &str)] = &[
-    ("auto", "自動（ノッチを避ける）"),
-    ("center", "中央"),
-    ("left-of-notch", "ノッチの左"),
-    ("right-of-notch", "ノッチの右"),
+const LANGUAGE_CHOICES: &[(&str, L)] = &[
+    ("auto", l("自動（OS に従う）", "Automatic (follow the OS)")),
+    ("ja", l("日本語", "日本語")),
+    ("en", l("English", "English")),
 ];
 
-const COMPACT_CHOICES: &[(&str, &str)] = &[
-    ("auto", "入り切らなければ縮める"),
-    ("always", "常に縮める"),
-    ("never", "縮めない"),
+const PLACEMENT_CHOICES: &[(&str, L)] = &[
+    ("bar", l("メニューバー", "Menu bar")),
+    ("dock", l("ドック（画面下）", "Dock (bottom of the screen)")),
+];
+
+const BAR_ALIGN_CHOICES: &[(&str, L)] = &[
+    (
+        "auto",
+        l("自動（ノッチを避ける）", "Automatic (avoid the notch)"),
+    ),
+    ("center", l("中央", "Centre")),
+    ("left-of-notch", l("ノッチの左", "Left of the notch")),
+    ("right-of-notch", l("ノッチの右", "Right of the notch")),
+];
+
+const COMPACT_CHOICES: &[(&str, L)] = &[
+    (
+        "auto",
+        l("入り切らなければ縮める", "Shrink when they stop fitting"),
+    ),
+    ("always", l("常に縮める", "Always shrink")),
+    ("never", l("縮めない", "Never shrink")),
 ];
 
 /// 設定の全項目。**UI が並べる順**でもある。
 pub fn fields() -> &'static [FieldSpec] {
-    &[
+    FIELDS
+}
+
+/// `fields()` の実体。`static` にしてあるのは、`L` が `l()`（const fn）で組み立て
+/// られていて関数内の `&[...]` だと一時値になるため（リテラルだけの頃は const
+/// promotion が効いていた）。
+static FIELDS: &[FieldSpec] = &[
+        // 言語を先頭に置くのは、他の項目の読み方そのものを決める設定だから。
+        // 英語話者が日本語の画面を開いたとき、最初に目に入る場所にある。
+        FieldSpec {
+            key: "language",
+            label: l("言語", "Language"),
+            kind: FieldKind::Choice(LANGUAGE_CHOICES),
+            help: l(
+                "設定画面・ビルダー・ホバーカードの文言。診断（doctor）は英語のまま。",
+                "Wording in the settings, the builder, and the hover card. Diagnostics stay English.",
+            ),
+        },
         FieldSpec {
             key: "placement",
-            label: "配置",
+            label: l("配置", "Placement"),
             kind: FieldKind::Choice(PLACEMENT_CHOICES),
-            help: "生き物をメニューバーに出すか、画面下のパネルに出すか。",
+            help: l(
+                "生き物をメニューバーに出すか、画面下のパネルに出すか。",
+                "Draw the creatures in the menu bar, or in a panel at the bottom of the screen.",
+            ),
         },
         FieldSpec {
             key: "design",
-            label: "生き物",
+            label: l("生き物", "Creature"),
             kind: FieldKind::Face,
-            help: "顔は faces/*.toml から来る。自分で作った顔もここに出る。",
+            help: l(
+                "顔は faces/*.toml から来る。自分で作った顔もここに出る。",
+                "Faces come from faces/*.toml. Ones you made yourself show up here too.",
+            ),
         },
         FieldSpec {
             key: "reduce_motion",
-            label: "動きを減らす",
+            label: l("動きを減らす", "Reduce motion"),
             kind: FieldKind::Bool,
-            help: "アニメーションを止める。",
+            help: l("アニメーションを止める。", "Stop the animations."),
         },
         FieldSpec {
             key: "show_glyphs",
-            label: "記号を表示",
+            label: l("記号を表示", "Show glyphs"),
             kind: FieldKind::Bool,
-            help: "状態記号（› ! ⋯ z ✓ ×）を出す。",
+            help: l(
+                "状態記号（› ! ⋯ z ✓ ×）を出す。",
+                "Show the state glyphs (› ! ⋯ z ✓ ×).",
+            ),
         },
         FieldSpec {
             key: "bar_align",
-            label: "帯の寄せ",
+            label: l("帯の寄せ", "Bar alignment"),
             kind: FieldKind::Choice(BAR_ALIGN_CHOICES),
-            help: "メニューバー配置のときの横位置。center はノッチ機だと隠れる。",
+            help: l(
+                "メニューバー配置のときの横位置。center はノッチ機だと隠れる。",
+                "Horizontal position in the menu bar. \"center\" hides them on notched Macs.",
+            ),
         },
         FieldSpec {
             key: "compact_flock",
-            label: "群れを縮める",
+            label: l("群れを縮める", "Shrink the flock"),
             kind: FieldKind::Choice(COMPACT_CHOICES),
-            help: "セッションが増えて帯に入り切らなくなったときの振る舞い。",
+            help: l(
+                "セッションが増えて帯に入り切らなくなったときの振る舞い。",
+                "What to do once there are more sessions than fit in the bar.",
+            ),
         },
         FieldSpec {
             key: "done_ttl_secs",
-            label: "完了 → アイドル",
+            label: l("完了 → アイドル", "Done → idle"),
             kind: FieldKind::Int {
                 min: 0,
                 max: 86_400,
-                unit: "秒",
+                unit: l("秒", "s"),
             },
-            help: "完了状態がアイドルへ変わるまでの時間。",
+            help: l(
+                "完了状態がアイドルへ変わるまでの時間。",
+                "How long the done state lasts before it turns into idle.",
+            ),
         },
         FieldSpec {
             key: "session_ttl_secs",
-            label: "セッションの保険 TTL",
+            label: l("セッションの保険 TTL", "Session safety-net TTL"),
             kind: FieldKind::Int {
                 min: 60,
                 max: 604_800,
-                unit: "秒",
+                unit: l("秒", "s"),
             },
-            help: "これだけ無更新なら消す。死んだセッションは pid で先に消えるので保険。",
+            help: l(
+                "これだけ無更新なら消す。死んだセッションは pid で先に消えるので保険。",
+                "Remove a session after this long without an update. Dead ones go earlier via their pid, so this is only a safety net.",
+            ),
         },
         FieldSpec {
             key: "max_sessions",
-            label: "同時に出す最大数",
+            label: l("同時に出す最大数", "Maximum shown at once"),
             kind: FieldKind::Int {
                 min: 1,
                 max: 64,
-                unit: "匹",
+                unit: l("匹", "sessions"),
             },
-            help: "これを超えた分は直近に動いたセッションが優先される。",
+            help: l(
+                "これを超えた分は直近に動いたセッションが優先される。",
+                "Past this many, the most recently active sessions win.",
+            ),
         },
         FieldSpec {
             key: "detect_errors",
-            label: "transcript でもエラー検出",
+            label: l("transcript でもエラー検出", "Detect errors from the transcript"),
             kind: FieldKind::Bool,
-            help: "Stop のたびに transcript の末尾を読む補助手段。既定は off。",
+            help: l(
+                "Stop のたびに transcript の末尾を読む補助手段。既定は off。",
+                "A best-effort extra: read the tail of the transcript on every Stop. Off by default.",
+            ),
         },
         FieldSpec {
             key: "dock_x",
-            label: "dock の x（中心）",
+            label: l("dock の x（中心）", "Dock x (centre)"),
             kind: FieldKind::Coord,
-            help: "ドラッグで決まる。auto で画面下部中央へ戻る。",
+            help: l(
+                "ドラッグで決まる。auto で画面下部中央へ戻る。",
+                "Set by dragging. \"auto\" returns it to the bottom centre of the screen.",
+            ),
         },
         FieldSpec {
             key: "dock_y",
-            label: "dock の y（下端）",
+            label: l("dock の y（下端）", "Dock y (bottom edge)"),
             kind: FieldKind::Coord,
-            help: "ドラッグで決まる。auto で画面下部中央へ戻る。",
+            help: l(
+                "ドラッグで決まる。auto で画面下部中央へ戻る。",
+                "Set by dragging. \"auto\" returns it to the bottom centre of the screen.",
+            ),
         },
-    ]
-}
+];
 
 pub fn field(key: &str) -> Option<&'static FieldSpec> {
     fields().iter().find(|f| f.key == key)
@@ -486,6 +608,7 @@ pub fn field(key: &str) -> Option<&'static FieldSpec> {
 /// 入力欄の初期値にすればよい（`the_current_value_of_every_field_round_trips`）。
 pub fn field_value(cfg: &Config, key: &str) -> Option<String> {
     let v = match key {
+        "language" => cfg.language.as_str().to_string(),
         "placement" => cfg.placement.as_str().to_string(),
         "design" => cfg.design.clone(),
         "reduce_motion" => cfg.reduce_motion.to_string(),
@@ -522,6 +645,11 @@ pub fn set_field(
     faces: &crate::face::Registry,
 ) -> Result<(), String> {
     match key {
+        "language" => {
+            cfg.language = Language::from_str(value).ok_or_else(|| {
+                format!("invalid language: {value:?} (want \"auto\" | \"ja\" | \"en\")")
+            })?
+        }
         "placement" => {
             cfg.placement = Placement::from_str(value)
                 .ok_or_else(|| format!("invalid placement: {value:?} (want \"bar\" | \"dock\")"))?
@@ -588,8 +716,11 @@ fn parse_int(key: &str, v: &str) -> Result<u64, String> {
     }) = field(key)
     {
         if n < *min || n > *max {
+            // 検証エラーは英語で固定する（`doctor` と同じ扱い）。単位の英語側だけ
+            // 借りるので、`unit` が `L` になっても文が混ざらない。
             return Err(format!(
-                "{key} は {min}〜{max}{unit} の範囲にしてください（got {n}）"
+                "{key} must be between {min} and {max} {unit} (got {n})",
+                unit = unit.en
             ));
         }
     }
@@ -620,6 +751,8 @@ fn parse_coord(v: &str) -> Result<Option<f64>, String> {
 
 #[derive(Deserialize)]
 struct RawConfig {
+    #[serde(default = "default_language")]
+    language: String,
     #[serde(default = "default_placement")]
     placement: String,
     #[serde(default = "default_design")]
@@ -649,6 +782,9 @@ struct RawConfig {
     detect_errors: bool,
 }
 
+fn default_language() -> String {
+    DEFAULT_LANGUAGE.into()
+}
 fn default_placement() -> String {
     DEFAULT_PLACEMENT.into()
 }
@@ -690,6 +826,12 @@ fn validate_dock_coord(key: &str, v: Option<f64>) -> Result<Option<f64>, String>
 }
 
 fn validate_and_build(raw: &RawConfig) -> Result<Config, String> {
+    let language = Language::from_str(&raw.language).ok_or_else(|| {
+        format!(
+            "invalid language: {:?} (want \"auto\" | \"ja\" | \"en\")",
+            raw.language
+        )
+    })?;
     let placement = Placement::from_str(&raw.placement).ok_or_else(|| {
         format!(
             "invalid placement: {:?} (want \"bar\" | \"dock\")",
@@ -721,6 +863,7 @@ fn validate_and_build(raw: &RawConfig) -> Result<Config, String> {
     })?;
 
     Ok(Config {
+        language,
         placement,
         design,
         reduce_motion: raw.reduce_motion,
@@ -1071,7 +1214,13 @@ detect_errors = true
                 continue;
             };
             for (value, label) in choices {
-                assert!(!label.is_empty(), "{} の選択肢にラベルが無い", f.key);
+                // 両方の言語を見る。片方だけ空だと、その言語の画面でだけ
+                // 選択肢が無名のボタンになる。
+                assert!(
+                    !label.ja.is_empty() && !label.en.is_empty(),
+                    "{} の選択肢 {value} に、どちらかの言語のラベルが無い",
+                    f.key
+                );
                 set_field(&mut cfg, f.key, value, &faces())
                     .unwrap_or_else(|e| panic!("{}={value} が拒否された: {e}", f.key));
             }

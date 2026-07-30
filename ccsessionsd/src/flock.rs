@@ -20,6 +20,7 @@ use objc2_quartz_core::{CALayer, CAShapeLayer};
 use std::sync::Arc;
 
 use ccsessions_core::face::FaceSpec;
+use ccsessions_core::lang::Lang;
 use ccsessions_core::session::{Session, SessionState};
 
 use crate::card::{self, AgentRow, CardView};
@@ -246,9 +247,10 @@ impl Flock {
         now: u64,
         done_ttl_ms: u64,
         reduce_motion: bool,
+        lang: Lang,
     ) -> card::Card {
         card::build(
-            &card_view_of(session, now, done_ttl_ms),
+            &card_view_of(session, now, done_ttl_ms, lang),
             self.size,
             self.scale,
             reduce_motion,
@@ -289,11 +291,13 @@ fn view_of(s: &Session, now: u64, done_ttl_ms: u64, show_glyphs: bool) -> View {
 }
 
 /// `Session` からホバーカードの内容を作る。
-fn card_view_of(s: &Session, now: u64, done_ttl_ms: u64) -> CardView {
+fn card_view_of(s: &Session, now: u64, done_ttl_ms: u64, lang: Lang) -> CardView {
+    let state = s.display_state(now, done_ttl_ms);
     CardView {
         name: s.name.clone(),
         title: s.title.clone(),
-        state: s.display_state(now, done_ttl_ms),
+        state,
+        state_label: state.label(lang),
         dur: Session::fmt_dur(now.saturating_sub(s.since)),
         agents: s
             .agents

@@ -14,6 +14,11 @@
 // 設定は `/api/config` が返すスキーマ、パーツは `/api/parts` が返す表を列挙して
 // 描く。設定を 1 つ足すときに触るのは core のスキーマだけ、パーツを足すときは
 // `parts.rs` の表だけ、という設計を画面側でも守る。
+//
+// # 文言の言語
+// サーバから来る文字列（設定のラベル・状態名・カテゴリ名）は**取得した時点で
+// 解決済み**。この画面が自前で持つ文言だけ下の `T` に対訳で置き、`applyLang` が
+// `data-i18n` を張り替える。言語は `/api/config` の `lang` で決まる。
 
 'use strict';
 
@@ -29,20 +34,129 @@ const state = {
   settings: null,  // /api/config の中身（スキーマ + 現在値 + 顔の選択肢）
   view: 'settings',
   builderReady: false, // キャラクター画面を初期化したか（開くまで作らない）
+  lang: 'ja',      // /api/config が決める。既定は HTML の lang 属性と揃える
 };
 
-// カテゴリの種類ごとに出すつまみ。[key, ラベル, 最小, 最大, 刻み, 既定]
+// この画面が自前で持つ文言。**サーバから来る文字列はここに書かない**
+// （設定のラベル・状態名・カテゴリ名はもう訳された状態で届く）。
+const T = {
+  'tab.settings':      ['設定', 'Settings'],
+  'tab.builder':       ['キャラクター', 'Character'],
+  'ident.name':        ['名前', 'Name'],
+  'ident.author':      ['作者', 'Author'],
+  'ident.optional':    ['任意', 'optional'],
+  'act.random':        ['🎲 ランダム', '🎲 Random'],
+  'act.randomHint':    ['キーボードの R でも', 'or press R'],
+  'act.save':          ['顔として保存', 'Save as a face'],
+  'act.exportJson':    ['JSON を書き出す', 'Export JSON'],
+  'act.importJson':    ['JSON を読み込む', 'Import JSON'],
+  'settings.hint':     ['変えた瞬間に <code>config.toml</code> へ書き、走っている <code>ccsessionsd</code> が数百 ms で拾う。',
+                        'Written to <code>config.toml</code> the moment you change it; a running <code>ccsessionsd</code> picks it up within a few hundred ms.'],
+  'settings.readFail': ['設定を読めません: ', 'cannot read the settings: '],
+  'settings.default':  ['既定の位置', 'default position'],
+  'settings.reset':    ['既定に戻す', 'Reset'],
+  'side.creature':     ['生き物', 'Creature'],
+  'side.creatureHint': ['顔を自分で作るには上の<strong>キャラクター</strong>へ。保存するとここに出る。',
+                        'To make your own, go to <strong>Character</strong> above. Saved faces appear here.'],
+  'side.saved':        ['保存した顔', 'Saved faces'],
+  'side.generatedToml':['生成される <code>&lt;id&gt;.toml</code>', 'Generated <code>&lt;id&gt;.toml</code>'],
+  'side.addPart':      ['パーツを足すには', 'Adding a part'],
+  'side.addPartBody':  ['<code>ccsessions-core/src/face/builder/parts.rs</code> の表に<strong>1 行足すだけ</strong>。この画面は <code>/api/parts</code> が返す表を列挙して描くので、HTML も JS も触らなくてよい。',
+                        'Add <strong>one row</strong> to the table in <code>ccsessions-core/src/face/builder/parts.rs</code>. This page just enumerates what <code>/api/parts</code> returns, so neither the HTML nor the JS needs touching.'],
+  'side.addPartTest':  ['<code>cargo test -p ccsessions-core face::builder</code> が「全パーツ × 全輪郭が検証を通る」ことを確かめる。',
+                        '<code>cargo test -p ccsessions-core face::builder</code> checks that every part passes validation on every outline.'],
+  'picker.parts':      ['パーツ', 'Parts'],
+  'picker.userMade':   ['自作', 'yours'],
+  'picker.prev':       ['前のパーツ（←）', 'previous part (←)'],
+  'picker.next':       ['次のパーツ（→）', 'next part (→)'],
+  'picker.count':      ['{} — {} 種', '{} — {} variants'],
+  'picker.none':       ['なし', '(empty)'],
+  'picker.partsFail':  ['パーツ一覧を取れません: ', 'cannot load the part list: '],
+  'size.dock':         ['dock（画面下）', 'dock (bottom of screen)'],
+  'size.bar':          ['bar（メニューバー）', 'bar (menu bar)'],
+  'stage.stateHint':   ['色とアニメは<strong>状態</strong>が決める（顔ごとには変えられない）。6 つ並べて実際の配色を確かめる。',
+                        'Colour and motion are decided by the <strong>state</strong> (they cannot vary per face). All six are shown so you can check the real palette.'],
+  'stage.eyeColor':    ['目の色', 'Eye colour'],
+  'tweak.onBar':       ['メニューバー（bar）にも描く', 'Draw in the menu bar too'],
+  'tweak.onBarHint':   ['bar は狭いので、線を増やすとシルエットと目が読みにくくなる。',
+                        'The bar is narrow: more lines make the silhouette and eyes harder to read.'],
+  'tweak.reset':       ['このカテゴリの微調整を戻す', 'Reset this category’s tweaks'],
+  'tweak.size':        ['大きさ', 'Size'],
+  'tweak.width':       ['幅', 'Width'],
+  'tweak.dx':          ['横位置', 'Horizontal'],
+  'tweak.dy':          ['縦位置', 'Vertical'],
+  'tweak.gap':         ['間隔', 'Spacing'],
+  'problem.ok':        ['検証を通っている。保存できる。', 'Passes validation. Ready to save.'],
+  'saved.none':        ['まだ無い（保存先: {}）', 'none yet (saved to {})'],
+  'saved.handMade':    ['（ビルダー外の顔）', '(not made in the builder)'],
+  'saved.edit':        ['編集', 'Edit'],
+  'saved.handWritten': ['手書き', 'hand-written'],
+  'load.notCharacter': ['キャラクターの設定ではないようです（parts がありません）。',
+                        'This does not look like a character config (no parts).'],
+  'png.failed':        ['PNG にできませんでした（SVG で書き出してください）',
+                        'could not make a PNG (export SVG instead)'],
+  'preview.failed':    ['プレビューを作れません: ', 'cannot build the preview: '],
+  'random.failed':     ['ランダム生成に失敗: ', 'random generation failed: '],
+  'load.badJson':      ['JSON として読めません: ', 'cannot read it as JSON: '],
+  'load.done':         ['{} を読み込んだ。', 'loaded {}.'],
+  'stage.eyeShrunk':   ['目がこの輪郭に収まらないので {}% に縮めた。',
+                        'the eyes do not fit this outline, so they were shrunk to {}%.'],
+};
+
+/// 対訳を引く。未知のキーはキーそのものを返す（画面が空白にならない）。
+///
+/// 名前が `tr` なのは、`renderGrid` / `renderTweaks` に `t` という局所変数が
+/// 既にあるため（`t` にすると内側で静かに影に隠れる）。
+function tr(key) {
+  const pair = T[key];
+  if (!pair) return key;
+  return state.lang === 'en' ? pair[1] : pair[0];
+}
+
+/// 対訳の `{}` を順に埋める。
+///
+/// 値を素朴に連結すると、日本語の閉じ括弧「）」と英語の ")" のように**前後が
+/// 言語で変わる**ものを表現できない。埋め込みは必ずこちらを通す。
+function trf(key, ...args) {
+  let i = 0;
+  return tr(key).replace(/\{\}/g, () => String(args[i++] ?? ''));
+}
+
+/** `data-i18n` の付いた要素を、いまの言語で張り替える。 */
+function applyLang() {
+  document.documentElement.lang = state.lang;
+  // 文中に <code> / <strong> を含む文言があるので innerHTML で入れる。
+  // **入るのは T に載っている定数だけ**。辞書に無いキーは innerHTML へ回さず
+  // 素通ししてマークアップを壊さない（外から来た文字列がこの経路に入る余地は
+  // 無いが、「HTML を入れてよいのは自前の定数のときだけ」を型でなく手続きで
+  // はっきりさせておく）。
+  for (const el of document.querySelectorAll('[data-i18n]')) {
+    const pair = T[el.dataset.i18n];
+    if (pair) el.innerHTML = state.lang === 'en' ? pair[1] : pair[0];
+  }
+  for (const el of document.querySelectorAll('[data-i18n-title]')) {
+    el.title = tr(el.dataset.i18nTitle);
+  }
+  for (const el of document.querySelectorAll('[data-i18n-placeholder]')) {
+    el.placeholder = tr(el.dataset.i18nPlaceholder);
+  }
+  for (const el of document.querySelectorAll('[data-i18n-aria-label]')) {
+    el.setAttribute('aria-label', tr(el.dataset.i18nAriaLabel));
+  }
+}
+
+// カテゴリの種類ごとに出すつまみ。[key, ラベルのキー, 最小, 最大, 刻み, 既定]
 const TWEAKS = {
-  face: [['scale', '大きさ', 0.6, 1.6, 0.02, 1]],
+  face: [['scale', 'tweak.size', 0.6, 1.6, 0.02, 1]],
   eyes: [
-    ['scale', '大きさ', 0.5, 1.6, 0.02, 1],
-    ['dy', '縦位置', -0.15, 0.15, 0.005, 0],
-    ['gap', '間隔', 0.4, 2.0, 0.02, 1],
+    ['scale', 'tweak.size', 0.5, 1.6, 0.02, 1],
+    ['dy', 'tweak.dy', -0.15, 0.15, 0.005, 0],
+    ['gap', 'tweak.gap', 0.4, 2.0, 0.02, 1],
   ],
   line: [
-    ['scale', '幅', 0.3, 1.6, 0.02, 1],
-    ['dx', '横位置', -0.25, 0.25, 0.01, 0],
-    ['dy', '縦位置', -0.15, 0.15, 0.005, 0],
+    ['scale', 'tweak.width', 0.3, 1.6, 0.02, 1],
+    ['dx', 'tweak.dx', -0.25, 0.25, 0.01, 0],
+    ['dy', 'tweak.dy', -0.15, 0.15, 0.005, 0],
   ],
 };
 
@@ -69,7 +183,7 @@ async function bootBuilder() {
   try {
     state.meta = await getJson('/api/parts');
   } catch (e) {
-    toast('パーツ一覧を取れません: ' + e.message, true);
+    toast(tr('picker.partsFail') + e.message, true);
     return;
   }
   state.builderReady = true;
@@ -113,12 +227,34 @@ async function loadSettings() {
   try {
     state.settings = await getJson('/api/config');
   } catch (e) {
-    $('#fields').textContent = '設定を読めません: ' + e.message;
+    $('#fields').textContent = tr('settings.readFail') + e.message;
     return;
+  }
+  // **言語はサーバが決める**（設定の `language`、`auto` なら Accept-Language）。
+  // 言語を変えた直後もここを通るので、画面全体がその場で張り替わる。
+  if (state.settings.lang && state.settings.lang !== state.lang) {
+    state.lang = state.settings.lang;
+    applyLang();
+    // 開いていればビルダー側の文言（サーバ由来のカテゴリ名・状態名）も取り直す。
+    if (state.builderReady) reloadBuilderText();
   }
   $('#config-path').textContent = state.settings.path;
   renderFields();
   renderFacePicker();
+}
+
+/** 言語が変わったとき、サーバから来ている文言を取り直して描き直す。 */
+async function reloadBuilderText() {
+  try {
+    state.meta = await getJson('/api/parts');
+  } catch (e) {
+    toast(tr('picker.partsFail') + e.message, true);
+    return;
+  }
+  buildTabs();
+  buildEyeColors();
+  refresh();
+  loadSavedList();
 }
 
 /** 設定 1 項目を保存する。**画面の見た目はサーバが返した値に合わせ直す** */
@@ -212,9 +348,9 @@ function intInput(f) {
 
 function coordInput(f) {
   const wrap = el('div', '', 'num');
-  wrap.append(el('span', f.value === 'auto' ? '既定の位置' : f.value + ' pt', 'coord-value'));
+  wrap.append(el('span', f.value === 'auto' ? tr('settings.default') : f.value + ' pt', 'coord-value'));
   if (f.value !== 'auto') {
-    const b = el('button', '既定に戻す');
+    const b = el('button', tr('settings.reset'));
     b.onclick = () => setField(f.key, 'auto').then(loadSettings);
     wrap.append(b);
   }
@@ -234,7 +370,7 @@ function renderFacePicker() {
     // サーバが描いた SVG（`face::svg` が id / label をエスケープ済み）。
     art.innerHTML = face.svg;
     chip.append(art, el('span', face.label, 'name'));
-    if (!face.builtin) chip.append(el('span', '自作', 'badge'));
+    if (!face.builtin) chip.append(el('span', tr('picker.userMade'), 'badge'));
     chip.onclick = () => {
       current.value = face.id;
       renderFacePicker();
@@ -276,7 +412,7 @@ function refresh() {
     try {
       res = await postJson('/api/preview', state.config);
     } catch (e) {
-      toast('プレビューを作れません: ' + e.message, true);
+      toast(tr('preview.failed') + e.message, true);
       return;
     }
     if (my !== state.seq) return; // 追い越された応答は捨てる
@@ -322,15 +458,15 @@ function renderGrid() {
   // 見出し + 左右送り（サムネイルを見ずに順に試したいとき用）。
   const head = el('div');
   head.className = 'picker-head';
-  head.append(el('span', `${cat.label} — ${cat.variants.length} 種`));
+  head.append(el('span', trf('picker.count', cat.label, cat.variants.length)));
   const nav = el('div');
   nav.className = 'nav';
   const prev = el('button', '←');
   const next = el('button', '→');
   prev.onclick = () => step(-1);
   next.onclick = () => step(1);
-  prev.title = '前のパーツ（←）';
-  next.title = '次のパーツ（→）';
+  prev.title = tr('picker.prev');
+  next.title = tr('picker.next');
   nav.append(prev, next);
   head.append(nav);
   grid.append(head);
@@ -348,9 +484,14 @@ function renderGrid() {
     const t = thumbs.find((x) => x.id === v.id);
     const box = el('div');
     // サムネイルはサーバが描いた SVG（自前で生成した文字列で、`face::svg` が
-    // id / label をエスケープ済み）。
+    // id をエスケープ済み）。
     box.innerHTML = t ? t.svg : '';
-    chip.append(box, el('span', v.label, 'name'));
+    chip.append(box);
+    // **パーツ名は出さない。** サムネイルがその形そのものなので、名前は
+    // 情報を足していなかった（訳す対象からも外れる）。id は `title` に入れて
+    // あるので、名指ししたいときはホバーで拾える。
+    // 「なし」だけは絵が空で、選べることが分からないので文字を出す。
+    if (v.id === 'none') chip.append(el('span', tr('picker.none'), 'name'));
     chip.onclick = () => setPart(cat.id, v.id);
     grid.append(chip);
   }
@@ -389,7 +530,7 @@ function renderTweaks(cat) {
   const fields = TWEAKS[cat.kind] || TWEAKS.line;
   const t = tweakOf(cat.id);
 
-  for (const [key, label, min, max, stepv, dflt] of fields) {
+  for (const [key, labelKey, min, max, stepv, dflt] of fields) {
     const row = el('div');
     row.className = 'tweak';
     const val = el('span', fmt(t[key] ?? dflt), 'val');
@@ -404,7 +545,7 @@ function renderTweaks(cat) {
       val.textContent = fmt(t[key]);
       refresh();
     };
-    row.append(el('span', label), input, val);
+    row.append(el('span', tr(labelKey)), input, val);
     box.append(row);
   }
 
@@ -419,13 +560,12 @@ function renderTweaks(cat) {
       t.bar = cb.checked;
       refresh();
     };
-    wrap.append(cb, el('span', 'メニューバー（bar）にも描く'));
+    wrap.append(cb, el('span', tr('tweak.onBar')));
     box.append(wrap);
-    const note = el('p', 'bar は狭いので、線を増やすとシルエットと目が読みにくくなる。', 'hint');
-    box.append(note);
+    box.append(el('p', tr('tweak.onBarHint'), 'hint'));
   }
 
-  const reset = el('button', 'このカテゴリの微調整を戻す');
+  const reset = el('button', tr('tweak.reset'));
   reset.className = 'reset';
   reset.onclick = () => {
     delete state.config.tweaks[cat.id];
@@ -469,7 +609,7 @@ function renderPreview(res) {
 
   $('#fit').textContent =
     res.eye_fit < 0.999
-      ? `目がこの輪郭に収まらないので ${Math.round(res.eye_fit * 100)}% に縮めた。`
+      ? trf('stage.eyeShrunk', Math.round(res.eye_fit * 100))
       : '';
 }
 
@@ -483,7 +623,7 @@ function renderProblems(res) {
     box.append(problemRow(res.warning.code, res.warning.message, 'warn'));
   }
   if (res.problems.length === 0) {
-    box.prepend(problemRow('OK', '検証を通っている。保存できる。', 'ok'));
+    box.prepend(problemRow('OK', tr('problem.ok'), 'ok'));
   }
 }
 
@@ -565,7 +705,7 @@ async function randomize() {
   try {
     state.config = await postJson('/api/random?seed=' + seed, state.config);
   } catch (e) {
-    toast('ランダム生成に失敗: ' + e.message, true);
+    toast(tr('random.failed') + e.message, true);
     return;
   }
   syncIdent();
@@ -594,21 +734,21 @@ async function loadSavedList() {
   }
   box.textContent = '';
   if (data.items.length === 0) {
-    box.append(el('p', `まだ無い（保存先: ${data.dir}）`, 'saved-empty'));
+    box.append(el('p', trf('saved.none', data.dir), 'saved-empty'));
     return;
   }
   for (const it of data.items) {
     const row = el('div');
     row.className = 'saved-item';
     const g = el('div', '', 'grow');
-    g.append(el('span', it.name || '（ビルダー外の顔）'), el('span', ' ' + it.id, 'id'));
+    g.append(el('span', it.name || tr('saved.handMade')), el('span', ' ' + it.id, 'id'));
     row.append(g);
     if (it.editable) {
-      const b = el('button', '編集');
+      const b = el('button', tr('saved.edit'));
       b.onclick = () => loadSaved(it.id);
       row.append(b);
     } else {
-      row.append(el('span', '手書き', 'id'));
+      row.append(el('span', tr('saved.handWritten'), 'id'));
     }
     box.append(row);
   }
@@ -624,7 +764,7 @@ async function loadSaved(id) {
   syncIdent();
   renderGrid();
   refresh();
-  toast(`${id} を読み込んだ。`);
+  toast(trf('load.done', id));
 }
 
 function openFile(e) {
@@ -636,18 +776,18 @@ function openFile(e) {
     try {
       cfg = JSON.parse(reader.result);
     } catch (err) {
-      toast('JSON として読めません: ' + err.message, true);
+      toast(tr('load.badJson') + err.message, true);
       return;
     }
     if (!cfg || typeof cfg !== 'object' || !cfg.parts) {
-      toast('キャラクターの設定ではないようです（parts がありません）。', true);
+      toast(tr('load.notCharacter'), true);
       return;
     }
     state.config = cfg;
     syncIdent();
     renderGrid();
     refresh();
-    toast(`${file.name} を読み込んだ。`);
+    toast(trf('load.done', file.name));
   };
   reader.readAsText(file);
   e.target.value = '';
@@ -695,12 +835,12 @@ function downloadPng() {
         setTimeout(() => URL.revokeObjectURL(u), 1000);
       }, 'image/png');
     } catch (e) {
-      toast('PNG にできませんでした（SVG で書き出してください）: ' + e.message, true);
+      toast(tr('png.failed') + ': ' + e.message, true);
     }
   };
   img.onerror = () => {
     URL.revokeObjectURL(url);
-    toast('PNG にできませんでした（SVG で書き出してください）。', true);
+    toast(tr('png.failed'), true);
   };
   img.src = url;
 }

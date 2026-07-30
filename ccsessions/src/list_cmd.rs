@@ -1,6 +1,6 @@
 //! `ccsessions list [--json]` — 生きているセッションを一覧表示する。
 
-use ccsessions_core::{config, now_ms, store};
+use ccsessions_core::{config, lang, now_ms, store};
 
 pub fn run(args: &[String]) -> i32 {
     let json = args.iter().any(|a| a == "--json");
@@ -27,13 +27,18 @@ pub fn run(args: &[String]) -> i32 {
         println!("(no live sessions)");
         return 0;
     }
+    // 状態名だけは設定の言語に従う（ホバーカードと同じ語が出ないと混乱するため）。
+    // このコマンドの他の出力とエラーは英語で固定。
+    let lang = cfg.language.resolve(lang::env_tag().as_deref());
     for s in &sessions {
         let disp = s.display_state(now, cfg.done_ttl_ms());
         let elapsed = ccsessions_core::session::Session::fmt_dur(now.saturating_sub(s.since));
+        // 桁は一番長い英語ラベル（"Agents running" = 14）に合わせる。日本語だけを
+        // 見て 10 にしていると、英語で名前の列が押し出される。
         println!(
-            "{glyph} {label:<10} {name:<20} {elapsed:>6}  agents={agents}",
+            "{glyph} {label:<14} {name:<20} {elapsed:>6}  agents={agents}",
             glyph = disp.glyph(),
-            label = disp.ja(),
+            label = disp.label(lang),
             name = s.name,
             elapsed = elapsed,
             agents = s.agents.len(),

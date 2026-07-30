@@ -58,8 +58,9 @@ fn check_id(spec: &FaceSpec, p: &mut Vec<Problem>) {
         p.push(Problem::new(
             ProblemCode::Id,
             format!(
-                "id {:?} は使えません。英小文字・数字・ハイフンだけで、\
-                 先頭は英数字、32 文字以内にしてください（例: \"my-face\"）",
+                "id {:?} is invalid. Use only lowercase letters, digits, and hyphens, \
+                 start with a letter or digit, and keep it to 32 characters or fewer \
+                 (e.g. \"my-face\")",
                 spec.id
             ),
         ));
@@ -76,10 +77,11 @@ fn check_bar_height(spec: &FaceSpec, p: &mut Vec<Problem>) {
         p.push(Problem::new(
             ProblemCode::BodySize,
             format!(
-                "bar の体の高さが {h}pt です。{MAX_BAR_BODY_H}pt 以下にしてください。\
-                 メニューバーは非ノッチ画面（外部モニタ・Air・旧機種）で 24pt しかなく、\
-                 上下の余裕 2pt を引くと {MAX_BAR_BODY_H}pt が上限になります。\
-                 これを超えると体そのものが縮められて生き物が小さくなります"
+                "The bar body height is {h}pt. Keep it at {MAX_BAR_BODY_H}pt or below. \
+                 Non-notched menu bars (external monitors, Air, older machines) are only \
+                 24pt tall, and subtracting 2pt of vertical margin gives an upper bound of \
+                 {MAX_BAR_BODY_H}pt. Exceeding this shrinks the body itself, making the \
+                 creature smaller"
             ),
         ));
     }
@@ -87,7 +89,10 @@ fn check_bar_height(spec: &FaceSpec, p: &mut Vec<Problem>) {
         if !(s.w.is_finite() && s.h.is_finite()) || s.w <= 0.0 || s.h <= 0.0 {
             p.push(Problem::new(
                 ProblemCode::BodySize,
-                format!("{size} の体の寸法 {}x{} が不正です（正の有限値）", s.w, s.h),
+                format!(
+                    "{size} body size {}x{} is invalid (must be a positive finite value)",
+                    s.w, s.h
+                ),
             ));
         }
     }
@@ -105,7 +110,7 @@ fn check_outline(spec: &FaceSpec, p: &mut Vec<Problem>) {
         let Some(last) = o.segs.last().map(|s| crate::face::seg_to(*s)) else {
             p.push(Problem::new(
                 ProblemCode::Outline,
-                format!("{} の輪郭に手が 1 つもありません", tag(size)),
+                format!("{} outline has no segments", tag(size)),
             ));
             continue;
         };
@@ -113,8 +118,9 @@ fn check_outline(spec: &FaceSpec, p: &mut Vec<Problem>) {
             p.push(Problem::new(
                 ProblemCode::Outline,
                 format!(
-                    "{} の輪郭が閉じていません（始点 {:?} → 終点 {last:?}）。\
-                     最後の手で始点へ戻してください（half = true なら鏡像が自動で戻します）",
+                    "{} outline is not closed (start {:?} -> end {last:?}). Make the last \
+                     segment return to the start point (with half = true, the mirrored half \
+                     returns automatically)",
                     tag(size),
                     o.start
                 ),
@@ -126,8 +132,8 @@ fn check_outline(spec: &FaceSpec, p: &mut Vec<Problem>) {
                 p.push(Problem::new(
                     ProblemCode::Outline,
                     format!(
-                        "{} で輪郭が体の矩形 {w}x{h} からはみ出します（点 ({x:.3}, {y:.3})）。\
-                         座標は 0..1 の比率で書いてください",
+                        "{} outline goes outside the body rectangle {w}x{h} \
+                         (point ({x:.3}, {y:.3})). Write coordinates as a 0..1 ratio",
                         tag(size)
                     ),
                 ));
@@ -157,7 +163,8 @@ fn check_symmetry(spec: &FaceSpec, p: &mut Vec<Problem>) {
         p.push(Problem::new(
             ProblemCode::Symmetry,
             format!(
-                "half = true の輪郭の点数が偶数（{}）で折り返し点が定まりません",
+                "half = true outline has an even number of points ({}), so the fold point \
+                 cannot be determined",
                 pts.len()
             ),
         ));
@@ -168,8 +175,8 @@ fn check_symmetry(spec: &FaceSpec, p: &mut Vec<Problem>) {
         p.push(Problem::new(
             ProblemCode::Symmetry,
             format!(
-                "half = true の輪郭の折り返し点が中央にありません（x = {:.3}、中央は {:.3}）。\
-                 d の最後の点は x = 0.5 にしてください",
+                "half = true outline's fold point is not centered (x = {:.3}, center is \
+                 {:.3}). Make the last point in d have x = 0.5",
                 pts[mid].0,
                 w / 2.0
             ),
@@ -181,7 +188,7 @@ fn check_symmetry(spec: &FaceSpec, p: &mut Vec<Problem>) {
         if (rx - (w - lx)).abs() > EPS || (ry - ly).abs() > EPS {
             p.push(Problem::new(
                 ProblemCode::Symmetry,
-                format!("half = true の輪郭が左右非対称です（{rx:.3} と {lx:.3}）"),
+                format!("half = true outline is not left-right symmetric ({rx:.3} vs {lx:.3})"),
             ));
             break;
         }
@@ -206,8 +213,9 @@ fn check_eyes(spec: &FaceSpec, p: &mut Vec<Problem>) {
                 p.push(Problem::new(
                     ProblemCode::EyesTooWide,
                     format!(
-                        "{}/{} で両目が体からはみ出します（目 {:.2} × 2 + 間隔 {gap} = {:.2} > 体の幅 {bw}）。\
-                         eyes.size を小さくするか eyes.gap を詰めてください",
+                        "{}/{}: both eyes don't fit in the body \
+                         (eye {:.2} x 2 + gap {gap} = {:.2} > body width {bw}). \
+                         Shrink eyes.size or tighten eyes.gap",
                         tag(size),
                         state.as_str(),
                         e.w,
@@ -232,8 +240,8 @@ fn check_eyes(spec: &FaceSpec, p: &mut Vec<Problem>) {
                         p.push(Problem::new(
                             ProblemCode::EyesOutsideBody,
                             format!(
-                                "{}/{} で目が顔からはみ出します（点 ({:.2}, {:.2})）。\
-                                 eyes.size を小さくするか eyes.v で位置を変えるか、輪郭を広げてください",
+                                "{}/{}: an eye goes outside the face (point ({:.2}, {:.2})). \
+                                 Shrink eyes.size, reposition with eyes.v, or widen the outline",
                                 tag(size),
                                 state.as_str(),
                                 pt.0,
@@ -278,9 +286,9 @@ fn check_state_readability(spec: &FaceSpec, size: Size, p: &mut Vec<Problem>) {
             p.push(Problem::new(
                 ProblemCode::StatesLookAlike,
                 format!(
-                    "{} の目が done と見分けられません。\
-                     [eyes.states.{}] で寸法・色・横目・瞬きのどれかを変えてください\
-                     （色とアニメは顔ごとに変えられないので、状態は目で読ませます）",
+                    "{} eyes look identical to done. Change size, color, sideways offset, \
+                     or blink under [eyes.states.{}] (color and animation can't vary per \
+                     face, so state must be conveyed through the eyes)",
                     state.as_str(),
                     state.as_str()
                 ),
@@ -308,8 +316,9 @@ fn check_details(spec: &FaceSpec, p: &mut Vec<Problem>) {
                     p.push(Problem::new(
                         ProblemCode::DetailOutsideBody,
                         format!(
-                            "{} のパネル線 {:?} が顔からはみ出します（点 ({:.2}, {:.2})）。\
-                             輪郭の内側へ寄せてください（縁ぎりぎりだと二重線に見えます）",
+                            "{} panel line {:?} goes outside the face (point ({:.2}, {:.2})). \
+                             Move it further inside the outline (right at the edge, it looks \
+                             like a double line)",
                             tag(size),
                             d.name,
                             pt.0,
@@ -329,9 +338,9 @@ fn check_details(spec: &FaceSpec, p: &mut Vec<Problem>) {
         p.push(Problem::new(
             ProblemCode::BarDetailsNotThinned,
             format!(
-                "bar のパネル線が {bar} 本で dock の {dock} 本より多くなっています。\
-                 bar は狭い（18x20pt に 7 本引くと潰れて塊になります）ので、\
-                 [[details]] の sizes で間引いてください"
+                "bar has {bar} panel lines, more than dock's {dock}. bar is narrow \
+                 (drawing 7 lines into 18x20pt collapses into a blob), so thin them out \
+                 with sizes in [[details]]"
             ),
         ));
     }
@@ -366,9 +375,10 @@ pub fn notch_width_warning(spec: &FaceSpec) -> Option<Problem> {
         Problem::new(
             ProblemCode::NotchWidth,
             format!(
-                "bar で 6 匹並べると幅 {w:.1}pt で、ノッチ右の見込み空き \
-                 {NOTCH_RIGHT_BUDGET:.1}pt を超えます。bar_align = \"auto\" は\
-                 ノッチの左へ逃げます（正常動作。前面アプリのメニューと重なることがあります）"
+                "Lining up 6 creatures in the bar takes {w:.1}pt, exceeding the estimated \
+                 {NOTCH_RIGHT_BUDGET:.1}pt of space to the right of the notch. \
+                 bar_align = \"auto\" will fall back to the left of the notch (this is \
+                 normal, though it may overlap the frontmost app's menu)"
             ),
         )
     })

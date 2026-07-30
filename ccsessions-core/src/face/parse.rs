@@ -23,7 +23,7 @@ pub fn parse(text: &str, source: Source) -> Result<FaceSpec, Vec<Problem>> {
     let raw: RawFace = toml::from_str(text).map_err(|e| {
         vec![Problem::new(
             ProblemCode::Parse,
-            format!("TOML を読めません: {e}"),
+            format!("Failed to parse TOML: {e}"),
         )]
     })?;
     build(raw, source)
@@ -133,14 +133,15 @@ fn build(raw: RawFace, source: Source) -> Result<FaceSpec, Vec<Problem>> {
         problems.push(Problem::new(
             ProblemCode::Id,
             format!(
-                "id {:?} は使えません。英小文字・数字・ハイフンだけで、\
-                 先頭は英数字、32 文字以内にしてください（例: \"my-face\"）",
+                "id {:?} is invalid. Use only lowercase letters, digits, and hyphens, \
+                 start with a letter or digit, and keep it to 32 characters or fewer \
+                 (e.g. \"my-face\")",
                 raw.id
             ),
         ));
     }
     if raw.label.trim().is_empty() {
-        problems.push(Problem::new(ProblemCode::Parse, "label が空です"));
+        problems.push(Problem::new(ProblemCode::Parse, "label is empty"));
     }
 
     let size = BySize {
@@ -172,10 +173,7 @@ fn build(raw: RawFace, source: Source) -> Result<FaceSpec, Vec<Problem>> {
         }),
         _ => {
             if problems.is_empty() {
-                problems.push(Problem::new(
-                    ProblemCode::Parse,
-                    "顔を組み立てられませんでした",
-                ));
+                problems.push(Problem::new(ProblemCode::Parse, "Could not build the face"));
             }
             Err(problems)
         }
@@ -201,7 +199,7 @@ fn build_outline(raw: &RawOutline, problems: &mut Vec<Problem>) -> Option<Outlin
             if raw.d.is_some() {
                 problems.push(Problem::new(
                     ProblemCode::Parse,
-                    "kind = \"corners\" では d は使えません（kind = \"path\" にしてください）",
+                    "d cannot be used with kind = \"corners\" (use kind = \"path\" instead)",
                 ));
             }
             match (raw.corners, &raw.corners_pt) {
@@ -213,14 +211,14 @@ fn build_outline(raw: &RawOutline, problems: &mut Vec<Problem>) -> Option<Outlin
                 (Some(_), Some(_)) => {
                     problems.push(Problem::new(
                         ProblemCode::Parse,
-                        "corners と corners_pt は同時に書けません。どちらか一方にしてください",
+                        "corners and corners_pt cannot both be set. Use only one of them",
                     ));
                     None
                 }
                 (None, None) => {
                     problems.push(Problem::new(
                         ProblemCode::Parse,
-                        "kind = \"corners\" には corners か corners_pt のどちらかが要ります",
+                        "kind = \"corners\" requires either corners or corners_pt",
                     ));
                     None
                 }
@@ -230,8 +228,8 @@ fn build_outline(raw: &RawOutline, problems: &mut Vec<Problem>) -> Option<Outlin
             if raw.corners.is_some() || raw.corners_pt.is_some() || raw.d.is_some() {
                 problems.push(Problem::new(
                     ProblemCode::Parse,
-                    "kind = \"capsule\" では corners / corners_pt / d は使えません\
-                     （角丸は高さの半分に決まるため）",
+                    "corners / corners_pt / d cannot be used with kind = \"capsule\" \
+                     (the corner radius is fixed at half the height)",
                 ));
             }
             Some(OutlineSpec::Corners(CornerSpec::Capsule))
@@ -240,13 +238,13 @@ fn build_outline(raw: &RawOutline, problems: &mut Vec<Problem>) -> Option<Outlin
             if raw.corners.is_some() || raw.corners_pt.is_some() {
                 problems.push(Problem::new(
                     ProblemCode::Parse,
-                    "kind = \"path\" では corners / corners_pt は使えません",
+                    "corners / corners_pt cannot be used with kind = \"path\"",
                 ));
             }
             let Some(d) = raw.d.as_deref() else {
                 problems.push(Problem::new(
                     ProblemCode::Parse,
-                    "kind = \"path\" には d が要ります",
+                    "kind = \"path\" requires d",
                 ));
                 return None;
             };
@@ -265,10 +263,7 @@ fn build_outline(raw: &RawOutline, problems: &mut Vec<Problem>) -> Option<Outlin
         other => {
             problems.push(Problem::new(
                 ProblemCode::Parse,
-                format!(
-                    "outline.kind が {other:?} です\
-                     （\"corners\" | \"capsule\" | \"path\"）"
-                ),
+                format!("outline.kind is {other:?} (must be \"corners\" | \"capsule\" | \"path\")"),
             ));
             None
         }
@@ -282,7 +277,7 @@ fn build_eyes(raw: &RawEyes, problems: &mut Vec<Problem>) -> Option<EyesSpec> {
         other => {
             problems.push(Problem::new(
                 ProblemCode::Parse,
-                format!("eyes.shape が {other:?} です（\"rounded\" か \"polygon\"）"),
+                format!("eyes.shape is {other:?} (must be \"rounded\" or \"polygon\")"),
             ));
             return None;
         }
@@ -292,7 +287,7 @@ fn build_eyes(raw: &RawEyes, problems: &mut Vec<Problem>) -> Option<EyesSpec> {
         (EyeShape::Polygon, None) => {
             problems.push(Problem::new(
                 ProblemCode::Parse,
-                "eyes.shape = \"polygon\" には polygon が要ります",
+                "eyes.shape = \"polygon\" requires polygon",
             ));
             return None;
         }
@@ -300,7 +295,7 @@ fn build_eyes(raw: &RawEyes, problems: &mut Vec<Problem>) -> Option<EyesSpec> {
             problems.push(Problem::new(
                 ProblemCode::Parse,
                 format!(
-                    "eyes.polygon は 3 点以上が要ります（{} 点しかありません）",
+                    "eyes.polygon requires at least 3 points (only {} given)",
                     p.len()
                 ),
             ));
@@ -308,7 +303,7 @@ fn build_eyes(raw: &RawEyes, problems: &mut Vec<Problem>) -> Option<EyesSpec> {
         (EyeShape::Rounded, Some(_)) => {
             problems.push(Problem::new(
                 ProblemCode::Parse,
-                "eyes.shape = \"rounded\" では polygon は使えません",
+                "polygon cannot be used with eyes.shape = \"rounded\"",
             ));
         }
         _ => {}
@@ -320,8 +315,8 @@ fn build_eyes(raw: &RawEyes, problems: &mut Vec<Problem>) -> Option<EyesSpec> {
             problems.push(Problem::new(
                 ProblemCode::Parse,
                 format!(
-                    "eyes.states.{key} は未知の状態です（working / wait_user / \
-                     wait_agent / idle / done / error）"
+                    "eyes.states.{key} is an unknown state (must be working / wait_user / \
+                     wait_agent / idle / done / error)"
                 ),
             ));
             continue;
@@ -334,8 +329,8 @@ fn build_eyes(raw: &RawEyes, problems: &mut Vec<Problem>) -> Option<EyesSpec> {
                     problems.push(Problem::new(
                         ProblemCode::Parse,
                         format!(
-                            "eyes.states.{key}.color が {c:?} です\
-                             （\"eye\" | \"eye_closed\" | \"eye_error\" | \"white\"）"
+                            "eyes.states.{key}.color is {c:?} \
+                             (must be \"eye\" | \"eye_closed\" | \"eye_error\" | \"white\")"
                         ),
                     ));
                     EyeColor::Eye
@@ -377,7 +372,7 @@ fn build_details(raw: &[RawDetail], problems: &mut Vec<Problem>) -> Vec<DetailSp
         if seen.contains(&d.name.as_str()) {
             problems.push(Problem::new(
                 ProblemCode::Parse,
-                format!("details の name {:?} が重複しています", d.name),
+                format!("duplicate details name {:?}", d.name),
             ));
         }
         seen.push(&d.name);
@@ -386,7 +381,7 @@ fn build_details(raw: &[RawDetail], problems: &mut Vec<Problem>) -> Vec<DetailSp
             problems.push(Problem::new(
                 ProblemCode::Parse,
                 format!(
-                    "details {:?} の points は 2 点以上が要ります（{} 点しかありません）",
+                    "details {:?} points requires at least 2 points (only {} given)",
                     d.name,
                     d.points.len()
                 ),
@@ -404,7 +399,7 @@ fn build_details(raw: &[RawDetail], problems: &mut Vec<Problem>) -> Vec<DetailSp
                         other => problems.push(Problem::new(
                             ProblemCode::Parse,
                             format!(
-                                "details {:?} の sizes に {other:?} があります（\"bar\" か \"dock\"）",
+                                "details {:?} sizes contains {other:?} (must be \"bar\" or \"dock\")",
                                 d.name
                             ),
                         )),
@@ -452,8 +447,8 @@ fn parse_path(d: &str) -> Result<((f64, f64), Vec<Seg>), Problem> {
                 return Err(Problem::new(
                     ProblemCode::Parse,
                     format!(
-                        "d に相対座標の命令 {tok:?} があります。\
-                         絶対座標（大文字の M / L / C / Z）で書いてください"
+                        "d has a relative-coordinate command {tok:?}. Use absolute \
+                         coordinates (uppercase M / L / C / Z)"
                     ),
                 ))
             }
@@ -461,8 +456,8 @@ fn parse_path(d: &str) -> Result<((f64, f64), Vec<Seg>), Problem> {
                 return Err(Problem::new(
                     ProblemCode::Parse,
                     format!(
-                        "d の命令 {tok:?} は未対応です。M / L / C / Z だけが使えます\
-                         （円弧や 2 次ベジェはベクタツール側で 3 次ベジェへ変換してください）"
+                        "d command {tok:?} is not supported. Only M / L / C / Z can be used \
+                         (convert arcs or quadratic Béziers to cubic Béziers in your vector tool)"
                     ),
                 ))
             }
@@ -470,8 +465,8 @@ fn parse_path(d: &str) -> Result<((f64, f64), Vec<Seg>), Problem> {
                 return Err(Problem::new(
                     ProblemCode::Parse,
                     format!(
-                        "d に読めない字句 {other:?} があります。\
-                         命令文字（M / L / C / Z）の省略には対応していません"
+                        "d has an unreadable token {other:?}. Omitting the command letter \
+                         (M / L / C / Z) is not supported"
                     ),
                 ))
             }
@@ -481,19 +476,19 @@ fn parse_path(d: &str) -> Result<((f64, f64), Vec<Seg>), Problem> {
             let t = tokens.next().ok_or_else(|| {
                 Problem::new(
                     ProblemCode::Parse,
-                    format!("d の命令 {cmd} に数値が足りません"),
+                    format!("d command {cmd} is missing numbers"),
                 )
             })?;
             let v: f64 = t.parse().map_err(|_| {
                 Problem::new(
                     ProblemCode::Parse,
-                    format!("d の {t:?} を数値として読めません"),
+                    format!("d value {t:?} cannot be read as a number"),
                 )
             })?;
             if !v.is_finite() {
                 return Err(Problem::new(
                     ProblemCode::Parse,
-                    format!("d の数値 {t:?} が有限ではありません"),
+                    format!("d number {t:?} is not finite"),
                 ));
             }
             Ok(v)
@@ -504,14 +499,14 @@ fn parse_path(d: &str) -> Result<((f64, f64), Vec<Seg>), Problem> {
                 if start.is_some() {
                     return Err(Problem::new(
                         ProblemCode::Parse,
-                        "d に M が 2 回以上あります。輪郭は 1 本の閉じたパスで書いてください",
+                        "d has M more than once. Write the outline as a single closed path",
                     ));
                 }
                 start = Some((num("M")?, num("M")?));
             }
             "L" => {
                 if start.is_none() {
-                    return Err(Problem::new(ProblemCode::Parse, "d は M で始めてください"));
+                    return Err(Problem::new(ProblemCode::Parse, "d must start with M"));
                 }
                 segs.push(Seg::Line {
                     to: (num("L")?, num("L")?),
@@ -519,7 +514,7 @@ fn parse_path(d: &str) -> Result<((f64, f64), Vec<Seg>), Problem> {
             }
             "C" => {
                 if start.is_none() {
-                    return Err(Problem::new(ProblemCode::Parse, "d は M で始めてください"));
+                    return Err(Problem::new(ProblemCode::Parse, "d must start with M"));
                 }
                 segs.push(Seg::Cubic {
                     c1: (num("C")?, num("C")?),
@@ -533,13 +528,10 @@ fn parse_path(d: &str) -> Result<((f64, f64), Vec<Seg>), Problem> {
         }
     }
 
-    let start = start
-        .ok_or_else(|| Problem::new(ProblemCode::Parse, "d が空です（M で始めてください）"))?;
+    let start =
+        start.ok_or_else(|| Problem::new(ProblemCode::Parse, "d is empty (must start with M)"))?;
     if segs.is_empty() {
-        return Err(Problem::new(
-            ProblemCode::Parse,
-            "d に手が 1 つもありません",
-        ));
+        return Err(Problem::new(ProblemCode::Parse, "d has no segments"));
     }
     Ok((start, segs))
 }
@@ -575,37 +567,37 @@ mod tests {
     #[test]
     fn rejects_relative_commands() {
         let e = parse_path("M 0 0 l 1 0").unwrap_err();
-        assert!(e.message.contains("相対座標"), "{}", e.message);
+        assert!(e.message.contains("relative-coordinate"), "{}", e.message);
     }
 
     #[test]
     fn rejects_unsupported_commands() {
         let e = parse_path("M 0 0 A 1 1 0 0 1 1 1").unwrap_err();
-        assert!(e.message.contains("未対応"), "{}", e.message);
+        assert!(e.message.contains("not supported"), "{}", e.message);
     }
 
     #[test]
     fn rejects_a_second_move() {
         let e = parse_path("M 0 0 L 1 0 M 2 2").unwrap_err();
-        assert!(e.message.contains("M が 2 回"), "{}", e.message);
+        assert!(e.message.contains("more than once"), "{}", e.message);
     }
 
     #[test]
     fn rejects_missing_numbers() {
         let e = parse_path("M 0 0 C 1 1 2 2 3").unwrap_err();
-        assert!(e.message.contains("数値が足りません"), "{}", e.message);
+        assert!(e.message.contains("missing numbers"), "{}", e.message);
     }
 
     #[test]
     fn rejects_implicit_command_repetition() {
         let e = parse_path("M 0 0 L 1 0 2 0").unwrap_err();
-        assert!(e.message.contains("省略"), "{}", e.message);
+        assert!(e.message.contains("Omitting"), "{}", e.message);
     }
 
     #[test]
     fn rejects_non_finite_numbers() {
         let e = parse_path("M 0 0 L inf 0").unwrap_err();
-        assert!(e.message.contains("有限"), "{}", e.message);
+        assert!(e.message.contains("not finite"), "{}", e.message);
     }
 
     #[test]
@@ -739,7 +731,7 @@ points = [[0.425,0.78],[0.425,0.945]]
         );
         let e = err_of(&text);
         assert!(
-            e.iter().any(|p| p.message.contains("同時に書けません")),
+            e.iter().any(|p| p.message.contains("cannot both be set")),
             "{e:?}"
         );
     }
@@ -749,7 +741,7 @@ points = [[0.425,0.78],[0.425,0.945]]
         let text = MINIMAL.replace("corners = [[0.5,0.5],[0.5,0.5],[0.5,0.5],[0.5,0.5]]", "");
         let e = err_of(&text);
         assert!(
-            e.iter().any(|p| p.message.contains("どちらかが要ります")),
+            e.iter().any(|p| p.message.contains("requires either")),
             "{e:?}"
         );
     }
@@ -759,7 +751,7 @@ points = [[0.425,0.78],[0.425,0.945]]
         let text = MINIMAL.replace("shape = \"rounded\"", "shape = \"polygon\"");
         let e = err_of(&text);
         assert!(
-            e.iter().any(|p| p.message.contains("polygon が要ります")),
+            e.iter().any(|p| p.message.contains("requires polygon")),
             "{e:?}"
         );
     }
@@ -768,7 +760,10 @@ points = [[0.425,0.78],[0.425,0.945]]
     fn rejects_an_unknown_state_key() {
         let text = format!("{MINIMAL}\n[eyes.states.sleeping]\nh_scale = 0.5\n");
         let e = err_of(&text);
-        assert!(e.iter().any(|p| p.message.contains("未知の状態")), "{e:?}");
+        assert!(
+            e.iter().any(|p| p.message.contains("unknown state")),
+            "{e:?}"
+        );
     }
 
     #[test]
