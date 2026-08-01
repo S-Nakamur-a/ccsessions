@@ -128,6 +128,20 @@ settings are never reset because of it. You can also edit the list in
 
 The badge is the number of agents that session is running.
 
+## Updating
+
+Two halves: the binaries come from brew, the hooks come from the plugin.
+
+```sh
+brew update && brew upgrade ccsessions
+```
+
+brew restarts the daemon for you. Then, inside Claude Code — it applies after a restart:
+
+```
+/plugin update ccsessions@ccsessions-marketplace
+```
+
 ## Stopping and uninstalling
 
 | What you want | Command |

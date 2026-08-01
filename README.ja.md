@@ -121,6 +121,20 @@ ccsessions doctor        # いま何件隠れているかを確認できます
 
 バッジはそのセッションが走らせているエージェントの数です。
 
+## 更新する
+
+半分ずつです。バイナリは brew から、hook はプラグインから来ます。
+
+```sh
+brew update && brew upgrade ccsessions
+```
+
+常駐は brew が入れ替えてくれます。続いて Claude Code の中で（適用には再起動が要ります）:
+
+```
+/plugin update ccsessions@ccsessions-marketplace
+```
+
 ## やめる・消す
 
 | したいこと | コマンド |
