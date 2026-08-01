@@ -35,3 +35,4 @@
 | [0025](0025-ui-is-bilingual-diagnostics-are-english.md) | 画面の文言は日英、診断は英語。顔パーツ名は出さない |
 | [0026](0026-ignore-is-a-display-filter.md) | `ignore` は表示のフィルタ。枠を数える前に外す |
 | [0027](0027-release-automation.md) | リリースは Release PR のマージが引き金。タグは CI が打つ（0021 の続き） |
+| [0028](0028-preview-parks-the-brew-daemon.md) | 常駐の入口は brew ひとつ。手元のコードを起こすときは退避する（0021 の続き） |

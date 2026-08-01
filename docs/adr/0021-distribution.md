@@ -55,8 +55,10 @@ Apple Silicon で必須の ad-hoc 署名は、**macOS ホスト上で `cargo bui
 - **同じ理由で、formula に LaunchAgent の plist も書かせない。** `~/Library/LaunchAgents/`
   も prefix の外である以上、扱いは `settings.json` と同じ。`brew services` という別
   コマンドが存在するのは、まさに「常駐化はユーザが明示的に起こす操作」を install から
-  分離するため。**plist を書く主体は `brew services`（エンドユーザ）か `make plist`
-  （開発者）のどちらかだけで、formula は関与しない。**
+  分離するため。**plist を書く主体は `brew services` だけで、formula は関与しない。**
+  （当時は開発者向けに `make plist` も plist を書いていたが、常駐の入口が 2 つあること
+  自体が二重表示の原因だったので[ADR 0028](0028-preview-parks-the-brew-daemon.md)で
+  廃止した）
 - **`brew services start` を自動実行しない。** `caveats` で案内するに留める。
 - **`brew services` 側でもログは `~/Library/Logs/ccsessions/` に向ける**（`service do`
   ブロックの `log_path` / `error_log_path`）。`/tmp` は全ユーザ共有で、他人が先に同名の

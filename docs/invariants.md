@@ -259,6 +259,28 @@ read-modify-write 全体ではない。
 - **依存バージョンは実際に FFI が通ることを確かめた組み合わせでピン**
   （tao 0.35.3 / objc2 0.6 / objc2-* 0.3）。objc2 系は minor 更新でメソッド名・型が変わる。
 
+## 常駐（brew と手元を二重に出さない）
+
+手元のコードを起こす側（`make dev` / `demo` / `preview`）が brew 常駐を退避し、畳む側
+（`make stop` / `release`）が戻す（[ADR 0028](adr/0028-preview-parks-the-brew-daemon.md)）。
+
+- **退避は `launchctl bootout`。`brew services kill` を使わない。** formula は
+  `keep_alive true` なので Homebrew は kill を拒み、**しかも exit 0 で返す**。
+  呼んだ側は成功したと思い込み、**黙って二重に出る**。
+- **`brew services stop` も使わない。** plist ごと消えるので (1) 退避したのかユーザが
+  自分で止めたのか区別できなくなり、(2) 再ログインでも戻らない＝常用のオーバーレイが
+  黙って消えたままになる。`bootout` は plist を残すのでどちらも起きない。
+- **戻す条件は「plist は在るのに service が居ない」。** ユーザが `brew services stop`
+  したもの（plist が無い）を勝手に起こさない。
+- **bootout は非同期。** 消えるのを待ってから自分の daemon を起こす（待たないと
+  その間だけ二重に出る。直後に `bootstrap` すると
+  `Bootstrap failed: 5: Input/output error` で静かに失敗する、というのも実際に踏んだ）。
+- **常駐の入口は brew ひとつだけ。** Makefile から常駐させる導線
+  （`install` / `plist` / `start` / `restart` / `deploy` / `uninstall`）は廃止した。
+  入口を増やすと、その組み合わせぶんだけ二重表示の経路が増える。手元のコードを見るのは
+  `make dev`（debug）と `make preview`（release）で、どちらも常駐ではなくセッションの
+  プロセスとして起こす。
+
 ## 設定
 
 **入口を増やさない。GUI は `ccsessions ui` だけ**（メニューバーの status item は廃止した）。
