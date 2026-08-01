@@ -85,6 +85,8 @@ Apple Silicon で必須の ad-hoc 署名は、**macOS ホスト上で `cargo bui
   tap（`S-Nakamur-a/homebrew-tap`）へはリリースのたびに `url` / `sha256` を差し替えて
   コピーする。原本をこのリポジトリに置くのは、formula の変更をこの ADR と一緒に
   レビューできるようにするため。
+  → **[0027](0027-release-automation.md) が上書きした。** 実体は tap 側で、こちらは
+  レビュー用の**写し**。`url` / `sha256` を書くのは CI で、人間は手で直さない。
 - **ログの親ディレクトリは `brew services start` が作る。** Homebrew の
   `Service#path_dirs` が `log_path` / `error_log_path` の親を集め、
   `services/cli.rb` が `mkpath` する。formula 自身が prefix の外へ `mkdir` する
@@ -124,6 +126,10 @@ LICENSE（MIT）と `Cargo.toml` のメタデータは入れた（共通項目�
 → tap へコピー）。原本と tap に同じ formula が 2 つある構造なので、片方だけ直すと
 静かにずれる。原本をこのリポジトリに置く判断（レビュー可能性）とのトレードオフで、
 承知のうえで受けている。
+
+→ **この 4 手は [0027](0027-release-automation.md) が機械に渡した**（2026-07-29）。
+いまは `make release VERSION=x.y.z` で Release PR を出し、それをマージすると CI が
+タグを打って公開する。ずれの検出も PR 時の CI が持つ。**この節の手順を手でやらない。**
 
 ## `install-hooks` を消した（2026-07-29）
 

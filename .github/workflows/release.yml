@@ -1,0 +1,283 @@
+# リリース。**引き金は「Release PR が `main` にマージされたこと」**で、タグを打つのも
+# tap を更新するのもこのワークフロー。人間も `make release` もタグを打たない
+# （[`docs/adr/0027-release-automation.md`](../../docs/adr/0027-release-automation.md)）。
+#
+# **タグ push 起動の別ワークフローには分けない。** `GITHUB_TOKEN` で打ったタグは
+# 他のワークフローを起こさない（再帰を防ぐための GitHub の仕様）ので、分けると
+# 「CI が打ったタグでリリースが始まらない」で静かに止まる。タグ打ちから公開までを
+# **1 本で完結させる**のはそのため。
+#
+# **`main` へは 1 バイトも書かない。** 書くのはタグ ref・GitHub Release・tap の 3 つ
+# だけで、どれも `main` の ruleset の外側にある（ruleset は `target: branch`）。
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "リハーサル。タグも tap も Release も触らず、既存の最新タグの tarball で brew install まで通す"
+        type: boolean
+        default: true
+
+# 既定は読むだけ。書き込みが要るのは publish だけなので、そのジョブで開ける。
+permissions:
+  contents: read
+
+# リリースを 2 本並走させない。同じ版で走ると、後発の `git push` がタグの重複で
+# 失敗し、**失敗の掃除が先発の打ったタグを消す**。直列にすれば後発の detect が
+# 「タグはもうある」を見てリリースしないと判断する。
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 普段の `main` への push はここで数秒で終わる。**コミットメッセージは見ない**
+  # （`release:` と書き忘れても、書き間違えても壊れないように）。判定材料は
+  # 「`Cargo.toml` の版に対応するタグがまだ無いこと」だけ。
+  detect:
+    name: リリースする版があるか
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.decide.outputs.version }}
+      release: ${{ steps.decide.outputs.release }}
+      dry_run: ${{ steps.decide.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: decide
+        env:
+          # push のときは `false && …` が false を返すので "false" になる。
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          if [ "$DRY_RUN" = "true" ]; then
+            # リハーサルは**既存の最新タグ**で行う。まだ打っていないタグの tarball は
+            # 落とせない以上、`Cargo.toml` の版（＝次に出す版）ではリハーサルに
+            # ならない。これでタグも tap も Release も一切変えずに済む。
+            V=$(git ls-remote --tags --refs --sort=-v:refname origin 'v*.*.*' \
+                | head -1 | sed -E 's#.*refs/tags/v##')
+            if [ -z "$V" ]; then
+              echo "::error::タグが 1 つも無いのでリハーサルできない"
+              exit 1
+            fi
+            echo "リハーサル: 既存のタグ v$V の tarball に対して検証する"
+            {
+              echo "version=$V"
+              echo "release=true"
+              echo "dry_run=true"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          V=$(sed -n -E 's/^version = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' Cargo.toml | head -1)
+          if [ -z "$V" ]; then
+            echo "::error::Cargo.toml の [workspace.package] version を読めなかった"
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/v$V" >/dev/null 2>&1; then
+            echo "v$V は公開済み。リリースはしない。"
+            R=false
+          else
+            echo "v$V のタグが無い。リリースする。"
+            R=true
+          fi
+          {
+            echo "version=$V"
+            echo "release=$R"
+            echo "dry_run=false"
+          } >> "$GITHUB_OUTPUT"
+
+  guard:
+    name: 版の一致 + make check
+    needs: detect
+    if: needs.detect.outputs.release == 'true'
+    runs-on: macos-15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # **版が複数ファイルに散っている件を機械が握る 1 か所。** ずれたまま
+      # リリースすると、brew で入る版とプラグインが名乗る版が食い違う。
+      - name: Cargo.toml と plugin.json の版が一致するか
+        run: |
+          set -euo pipefail
+          CARGO_V=$(sed -n -E 's/^version = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' Cargo.toml | head -1)
+          PLUGIN_V=$(sed -n -E 's/.*"version": "([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' \
+                     plugins/ccsessions/.claude-plugin/plugin.json | head -1)
+          if [ -z "$CARGO_V" ]; then
+            echo "::error::Cargo.toml の [workspace.package] version を読めなかった"
+            exit 1
+          fi
+          if [ -z "$PLUGIN_V" ]; then
+            echo "::error::plugin.json の version を読めなかった"
+            exit 1
+          fi
+          if [ "$CARGO_V" != "$PLUGIN_V" ]; then
+            echo "::error::版がずれている — Cargo.toml=$CARGO_V / plugin.json=$PLUGIN_V"
+            exit 1
+          fi
+          echo "両方とも $CARGO_V"
+
+      # lock が古ければ落とす（`ci.yml` と同じ理由。`--locked` はビルドをしないので速い）。
+      - name: Cargo.lock が最新か
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      # ゲートは書き下さず `make` を呼ぶ（`ci.yml` の既存コメントと同じ理由。
+      # 手元と CI でゲートが 2 か所に分かれるのを避ける）。
+      - name: fmt --check + clippy -D warnings + test
+        run: make check
+
+  publish:
+    name: タグ → 実インストール検証 → 公開
+    needs: [detect, guard]
+    runs-on: macos-15
+    # source formula なので `brew install` は cargo build をまるごと回す。
+    timeout-minutes: 90
+    # タグの作成と GitHub Release に要る。**`main` へは書かない。**
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      V: ${{ needs.detect.outputs.version }}
+      FORMULA: packaging/homebrew/ccsessions.rb
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
+    steps:
+      - uses: actions/checkout@v5
+
+      # 1. tarball の URL はタグが無いと存在しないので、ここが最初になる。
+      #    **ruleset は `target: branch` なのでタグ ref には掛からない**
+      #    （bypass actors も GitHub App も要らない）。
+      - name: タグを打つ
+        if: needs.detect.outputs.dry_run != 'true'
+        run: |
+          set -euo pipefail
+          git tag "v$V"
+          git push origin "v$V"
+          echo "TAG_PUSHED=1" >> "$GITHUB_ENV"
+
+      # 2. 配る tarball は GitHub が生成するものそのもの（手作業でやっていたことと同じ）。
+      #    打ったばかりのタグは archive が出るまで一瞬遅れることがあるので retry する。
+      - name: tarball の sha256 を取る
+        run: |
+          set -euo pipefail
+          URL="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/v${V}.tar.gz"
+          SHA=$(curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors "$URL" \
+                | shasum -a 256 | cut -d' ' -f1)
+          if [ -z "$SHA" ]; then
+            echo "::error::sha256 を取れなかった: $URL"
+            exit 1
+          fi
+          echo "URL=$URL" >> "$GITHUB_ENV"
+          echo "SHA=$SHA" >> "$GITHUB_ENV"
+          echo "$URL -> $SHA"
+
+      # 3. 写しの `url` と `sha256` の **2 行だけ**を置換する。
+      - name: formula の url / sha256 を差し替える
+        run: |
+          set -euo pipefail
+          # 置換の前に対象が在ることを確かめる。**sed は 0 行置換でも成功で終わる**ので、
+          # ファイルの構造が変わったのに黙って何もせず、古い url のまま tap に載る
+          # という事故がこれを入れないと起こる。
+          grep -qE '^  url "' "$FORMULA" \
+            || { echo "::error::$FORMULA に url 行が無い"; exit 1; }
+          grep -qE '^  sha256 "' "$FORMULA" \
+            || { echo "::error::$FORMULA に sha256 行が無い"; exit 1; }
+
+          sed -i '' -E \
+            -e "s#^  url \".*\"#  url \"$URL\"#" \
+            -e "s#^  sha256 \".*\"#  sha256 \"$SHA\"#" \
+            "$FORMULA"
+
+          # 置換後を読み直す。ここまでが「0 行だったら落とす」の実装。
+          grep -qF "  url \"$URL\"" "$FORMULA" \
+            || { echo "::error::url を差し替えられなかった"; exit 1; }
+          grep -qF "  sha256 \"$SHA\"" "$FORMULA" \
+            || { echo "::error::sha256 を差し替えられなかった"; exit 1; }
+          echo "--- レンダリング結果 ---"
+          grep -E '^  (url|sha256) ' "$FORMULA"
+
+      # 4. **このワークフローの主目的。tap を動かす前に、本当に入るか確かめる。**
+      #    `brew audit` / `brew style` は**タップ配下の formula 名**しか受け付けない
+      #    （`brew audit <path>` は Homebrew 側で無効化されている）ので、
+      #    使い捨ての tap を作ってそこに置いてから名前で呼ぶ。
+      - name: 本当に brew install が通るか
+        run: |
+          set -euo pipefail
+          brew tap-new --no-git local/verify
+          cp "$FORMULA" "$(brew --repository local/verify)/Formula/ccsessions.rb"
+          brew audit --strict --online --formula local/verify/ccsessions
+          brew install --build-from-source local/verify/ccsessions
+          # formula の `test do` は hook の不変条件（ADR 0004 ＝ 必ず exit 0・
+          # stdout に何も書かない）を見ている。これが配布経路のスモークになる。
+          brew test local/verify/ccsessions
+
+      # 5. 緑のときだけ公開する。ここから先は dry_run では走らない。
+      - name: tap を checkout する
+        if: needs.detect.outputs.dry_run != 'true'
+        uses: actions/checkout@v5
+        with:
+          repository: S-Nakamur-a/homebrew-tap
+          # 期限切れ・剥奪はここで落ちる。**リリースだけが静かに止まり**、
+          # 既に配ってあるものには何も起きない。
+          token: ${{ secrets.TAP_TOKEN }}
+          path: tap
+
+      - name: tap を更新する
+        if: needs.detect.outputs.dry_run != 'true'
+        run: |
+          set -euo pipefail
+          cp "$FORMULA" tap/Formula/ccsessions.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/ccsessions.rb
+          if git diff --quiet --cached; then
+            echo "tap の formula に差が無い（再実行？）。push は省く。"
+          else
+            git commit -m "ccsessions v$V"
+            git push
+          fi
+          # ここから先で失敗してもタグは消せない（tap がもうそのタグを指している）。
+          echo "TAP_PUSHED=1" >> "$GITHUB_ENV"
+
+      - name: GitHub Release を作る
+        if: needs.detect.outputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "v$V" --title "v$V" --generate-notes
+
+      # 6. 失敗したら**打ったタグを消す**。まだ誰もそのタグを参照していない
+      #    （Release も tap も動いていない）ので、消しておけば直して**同じ版で**
+      #    やり直せる。消さないと patch を 1 つ空費する。
+      #
+      #    **tap を更新したあとは消さない。** 消すと tap が存在しないタグを指し、
+      #    ユーザの `brew install` が壊れる — このワークフローが防ぎたいものそのもの。
+      - name: 失敗したら打ったタグを消す
+        if: failure() && env.TAG_PUSHED == '1' && env.TAP_PUSHED != '1'
+        run: |
+          echo "失敗したので v$V を消す（直して同じ版でやり直せる）"
+          git push --delete origin "v$V" || true
+
+      - name: tap を更新したあとの失敗を知らせる
+        if: failure() && env.TAP_PUSHED == '1'
+        run: |
+          echo "::error::tap は v$V へ更新済みだが、そのあとで失敗した。タグ v$V は消していない（消すと tap が壊れるため）。GitHub Release だけ手で作る: gh release create v$V --generate-notes"
+          exit 1

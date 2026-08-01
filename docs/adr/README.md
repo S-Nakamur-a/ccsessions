@@ -34,3 +34,4 @@
 | [0024](0024-stop-is-not-the-end-of-subagents.md) | `Stop` はサブエージェントの終わりを意味しない（0005 の続き） |
 | [0025](0025-ui-is-bilingual-diagnostics-are-english.md) | 画面の文言は日英、診断は英語。顔パーツ名は出さない |
 | [0026](0026-ignore-is-a-display-filter.md) | `ignore` は表示のフィルタ。枠を数える前に外す |
+| [0027](0027-release-automation.md) | リリースは Release PR のマージが引き金。タグは CI が打つ（0021 の続き） |

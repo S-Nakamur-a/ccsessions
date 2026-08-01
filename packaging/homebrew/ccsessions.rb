@@ -1,9 +1,16 @@
 # ccsessions の Homebrew formula。
 #
-# **実体は tap（`S-Nakamur-a/homebrew-tap` の `Formula/ccsessions.rb`）に置く。**
-# このファイルはその原本で、リリースのたびに `url` と `sha256` を差し替えて
-# tap へコピーする。原本をこのリポジトリに置くのは、formula の変更が
-# 「なぜそう書いたか」（＝ ADR）と一緒にレビューできるようにするため。
+# **この formula は 2 か所にある。**
+#
+# - `ccsessions` の `packaging/homebrew/ccsessions.rb` — レビュー用の写し。
+#   formula の変更を「なぜそう書いたか」（＝ ADR）と一緒に読めるように置いてある。
+# - tap（`S-Nakamur-a/homebrew-tap` の `Formula/ccsessions.rb`）— **brew が実際に
+#   読むのはこちら。** 写しから機械がコピーする。
+#
+# **どちらも手で直さない行が 2 つある。** `url` と `sha256` は、リリースのたびに
+# `ccsessions` の `.github/workflows/release.yml` がタグの tarball から計算して
+# tap 側へ書く（`docs/adr/0027-release-automation.md`）。それ以外の行がこの 2 か所で
+# ずれたら、`ccsessions` の PR の CI（`ci.yml` の formula ジョブ）が落とす。
 #
 # 方針は [docs/adr/0021-distribution.md]。要点だけ再掲する。
 #
@@ -18,9 +25,9 @@
 class Ccsessions < Formula
   desc "Menu bar overlay showing running Claude Code sessions as a flock of creatures"
   homepage "https://github.com/S-Nakamur-a/ccsessions"
+  # この 2 行は前回のリリース時点の値。**手で差し替えない** —
+  # `release.yml` がタグを打ったあとに tarball の sha256 を取って tap 側へ書く。
   url "https://github.com/S-Nakamur-a/ccsessions/archive/refs/tags/v0.1.1.tar.gz"
-  # タグを push したあとに差し替える:
-  #   curl -sL https://github.com/S-Nakamur-a/ccsessions/archive/refs/tags/v0.1.1.tar.gz | shasum -a 256
   sha256 "353a148cfa6c877c96501a5ffaa3b0561c6ce22104cf660309bc483f214cc429"
   license "MIT"
   head "https://github.com/S-Nakamur-a/ccsessions.git", branch: "main"
