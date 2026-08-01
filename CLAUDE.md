@@ -20,6 +20,10 @@ fmt --check + clippy -D warnings + test）・`make test` / `make integration-tes
 - **`ccsessionsd` は `cargo run` で起動しない。必ず `make dev`**（走行中インスタンスの
   停止が要る macOS GUI なので）。dev のログは `/tmp/ccsessionsd-dev.log`。
 - 見た目のイテレーションは `ccsessionsd/src/theme.rs` の定数を編集 → `make dev` の繰り返し。
+- **brew 常駐との重複は Makefile が面倒を見る。** 起こす側（`dev` / `demo` / `preview`）が
+  退避し、畳む側（`stop` / `release`）が戻す。**退避は `launchctl bootout` で、
+  `brew services kill`（exit 0 で黙って何もしない）でも `stop`（plist ごと消える）でもない**
+  （[ADR 0028](docs/adr/0028-preview-parks-the-brew-daemon.md)）。
 
 ## アーキテクチャ
 
@@ -71,6 +75,7 @@ store を更新する。`settings_json.rs` は `~/.claude/settings.json` を**�
 | **bar はメニューバー高に収まる（33pt / 24pt）** | 帯の矩形ぶんメニューバーのクリックを奪う |
 | **群れの縮小は一様** | 縮めたのにはみ出す／体だけ縮んで目が飛び出す |
 | **アニメは CoreAnimation に自走させる／レイヤを作り直さない** | 常時 CPU を食う／群れが不自然に同期する |
+| **brew 常駐の退避は `bootout`（`brew services kill` / `stop` は使わない）** | kill は exit 0 で何もせず二重に出る／stop は plist を消して常用のオーバーレイが黙って消える |
 | **設定の入口は Web UI だけ。スキーマは `fields()` の 1 か所** | 片方が腐る（設定が嘘をつく） |
 | **顔は `faces/*.toml` が唯一の定義** | `theme.rs` に顔ごとの分岐が戻り、顔を足すのに Rust が要る |
 
@@ -98,9 +103,12 @@ store を更新する。`settings_json.rs` は `~/.claude/settings.json` を**�
 `sha256` 埋めまで済んでいて、`brew install S-Nakamur-a/tap/ccsessions` と
 `/plugin marketplace add S-Nakamur-a/ccsessions` の両方が実際に通る。
 
-リリースは `make release VERSION=x.y.z` の 1 コマンド
-（[`docs/adr/0027-release-automation.md`](docs/adr/0027-release-automation.md)）。
-これは版を上げた **Release PR を出すところで止まる**。引き金は**その PR をマージする
+リリースは 2 コマンドで回す。**`make preview`**（`main` のコードを production と同じ
+release ビルドで起こして目視する。brew 常駐は退避される —
+[ADR 0028](docs/adr/0028-preview-parks-the-brew-daemon.md)）→ OK なら
+**`make release VERSION=x.y.z`**（preview を畳んで brew 常駐を戻し、Release PR を出す。
+[ADR 0027](docs/adr/0027-release-automation.md)）。
+後者は版を上げた **Release PR を出すところで止まる**。引き金は**その PR をマージする
 こと**で、そこから先（タグを打つ → tarball の `sha256` を取る → formula を
 レンダリングする → **実際に `brew install` と `brew test` を通す** → tap を更新して
 GitHub Release を作る）は `.github/workflows/release.yml` がやる。

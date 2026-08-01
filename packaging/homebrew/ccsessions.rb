@@ -84,8 +84,8 @@ class Ccsessions < Formula
       設定と顔作りの GUI:   ccsessions ui
       導入状況の確認:       ccsessions doctor
 
-      `make start` で入れた LaunchAgent が残っていると生き物が二重に出ます。
-      `ccsessions doctor` が検出します。
+      開発用に手で入れた LaunchAgent（dev.ccsessions.ccsessionsd）が残っていると
+      生き物が二重に出ます。`ccsessions doctor` が検出します。
     EOS
   end
 

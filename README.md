@@ -194,17 +194,27 @@ ccsessions hook                 # called by Claude Code's hooks (JSON on stdin)
 ## Development
 
 ```sh
-make check   # fmt --check + clippy -D warnings + test (the pre-commit quality gate)
-make dev     # stop the running daemon, build, then launch the dev binary (no install needed)
-make demo    # check the look with dummy sessions in all 6 states (no real sessions needed)
-make help    # list the targets
+make check    # fmt --check + clippy -D warnings + test (the pre-commit quality gate)
+make dev      # stop the running daemon, build, then launch the dev binary (no install needed)
+make demo     # check the look with dummy sessions in all 6 states (no real sessions needed)
+make preview  # run main's code the way production runs it (release build), before a release
+make stop     # stop whatever you started here and bring the brew daemon back
+make help     # list the targets
 ```
 
 You need the Rust toolchain from [rustup](https://rustup.rs/) (MSRV 1.89).
-`make install` puts it in `~/.cargo/bin`, and `make start` runs the daemon.
-Running it under `brew services` and by hand at the same time shows every creature twice, so
-pick one (`ccsessions doctor` detects this). Hooks go in via the plugin during development
-too — a checkout works as a marketplace as is, so run `/plugin marketplace add .` and then
+
+**The resident daemon is the brew one, and it is the only one.** There is no
+`make install` / `make start`: a second way to run it resident is what made every
+creature appear twice. To look at your own build, `make dev` (debug) or `make preview`
+(release) runs it in the foreground of your session instead — both park the brew daemon
+first (`launchctl bootout`, which keeps the plist), and `make stop` — or `make release` —
+brings it back. Forget to, and it comes back at your next login anyway. Start one by hand
+and you are on your own; `ccsessions doctor` detects the overlap.
+See [ADR 0028](docs/adr/0028-preview-parks-the-brew-daemon.md).
+
+Hooks go in via the plugin during development too — a checkout works as a marketplace as
+is, so run `/plugin marketplace add .` and then
 `/plugin install ccsessions@ccsessions-marketplace`.
 
 When you edit the README, update both languages: this file and

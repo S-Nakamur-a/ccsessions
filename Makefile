@@ -1,35 +1,48 @@
-# ccsessions — dev / deploy helpers
+# ccsessions — dev / release helpers
 #
 # 設定・顔作り:
-#   `make config`  … Web UI（127.0.0.1:8787）。**設定の入口はここだけ**
+#   `make config`  … Web UI（127.0.0.1:8787）。設定の入口はここだけ
 #                    （メニューバーの status item は廃止した）
 #
 # 見た目イテレーション（一番よく使う）:
 #   ccsessionsd/src/theme.rs の定数をいじる → `make dev` → 画面で確認 → 繰り返す
 #
-# 使う（開発ではなく常用する）:
-#   `make start`   … 導入済みの ccsessionsd を常駐開始する。**ビルドしない**
-#   `make stop`    … 止める
-#   `make deploy`  … ビルドして入れ直し、常駐を入れ替える（更新の反映）
+# リリース（この 2 つで回す）:
+#   `make preview`             … main のコードを production と同じ形で起動して目視する
+#   `make release VERSION=x.y.z` … preview を畳んで Release PR を出す
+#
+# 常駐（production）は brew のものだけ。`brew services start ccsessions` で起こし、
+# 更新は `brew upgrade ccsessions` で降ってくる。Makefile から常駐させる導線
+# （install / plist / start / restart / deploy / uninstall）は消した — 入口が 2 つ
+# あること自体が「生き物が二重に出る」の原因で、手元のコードを見る用は
+# `make dev`（debug）と `make preview`（release）で足りる。docs/adr/0028 を参照。
+#
+# その brew 常駐との重複は Makefile が面倒を見る。手元のコードを起こす側
+# （dev / demo / preview）が brew 常駐を退避し、畳む側（stop / release）が戻す。
+# 退避は `launchctl bootout` で、plist は消さない。だから戻し忘れても次のログインで
+# launchd が読み直して production が自ら復活する。恒久的に消えたままになる経路を
+# 作らないための選択。
 
 CARGO      ?= cargo
 UID        := $(shell id -u)
-# LaunchAgent のラベル。plist のファイル名（$(PLIST)）もこれで決まる。
-# **変えるなら「古いラベルで stop → plist を消す → 新ラベルで start」の順**。
-# 先に書き換えると `make stop` が新ラベルを探しにいき、古いエージェントが
-# 生き残って生き物が二重に出る。
+# かつて `make start` が置いていた LaunchAgent。導線は消したが、置き土産が残っている
+# 環境があるので、手元の daemon を起こす前に落とす（残っていると二重に出る）。
+# `ccsessions doctor` も検出する。
 LABEL      := dev.ccsessions.ccsessionsd
 AGENT      := gui/$(UID)/$(LABEL)
-PLIST      := $(HOME)/Library/LaunchAgents/$(LABEL).plist
-# 常駐（LaunchAgent）のログの置き場。**`/tmp` には置かない**。macOS の `/tmp` は
-# 全ユーザ共有で、他人が先に同名の symlink を作っておけば launchd が**こちらの
-# 権限で**その先へ追記してしまう。加えて再起動で消え、3 日で掃除され、Console.app
-# からも辿れない。`~/Library/Logs/<name>/` が macOS の標準的な期待。
-# （`make dev` の `/tmp/ccsessionsd-dev.log` は開発用の使い捨てなのでそのまま）
-LOGDIR     := $(HOME)/Library/Logs/ccsessions
-DAEMON     := $(HOME)/.cargo/bin/ccsessionsd
 DAEMON_DEV := target/debug/ccsessionsd
-CLI        := $(HOME)/.cargo/bin/ccsessions
+# `make preview` が起こすもの。release ビルドで、brew で配るものと同じ最適化。
+DAEMON_PRE := target/release/ccsessionsd
+# brew 由来の常駐。formula は `keep_alive true` なので、プロセスを殺しても launchd が
+# 蘇らせる。止める手段は launchd に外させることだけ。
+#
+# `brew services kill` は使えない。`keep_alive true` の service を Homebrew は拒む
+# （"is set to automatically restart and can't be killed"）うえ、exit 0 で返すので、
+# 呼んでも黙って何も起きない（実際に踏んだ）。
+# `brew services stop` も使わない。あれは plist ごと消すので、退避したのかユーザが
+# 自分で止めたのかが区別できなくなる（そして再ログインでも戻らない）。
+BREW_AGENT  := gui/$(UID)/homebrew.mxcl.ccsessions
+BREW_PLIST  := $(HOME)/Library/LaunchAgents/homebrew.mxcl.ccsessions.plist
 # **hook の配線ターゲットはここには無い。** settings.json に書くのは Claude Code
 # プラグイン（plugins/ccsessions/）の仕事で、ccsessions は他人の設定ファイルを
 # 一切書き換えない（docs/adr/0021-distribution.md）。開発中に配線するなら
@@ -38,13 +51,46 @@ CLI        := $(HOME)/.cargo/bin/ccsessions
 .DEFAULT_GOAL := help
 
 # ---------------------------------------------------------------------------
+# brew 常駐の退避と復帰（手元のコードを起こす全部から使う）
+# ---------------------------------------------------------------------------
+#
+# ヘルプに出さない（`##` を付けない）。人間が直接叩くものではなく、
+# dev / demo / preview / stop / release が内部で呼ぶ対。単体で呼ばれても壊れない
+# ように、どちらも「いま退避が要る／戻す先があるか」を自分で見てから動く。
+
+# 走っていなければ何もしない。bootout は非同期（`restart` の注記と同じ）なので、
+# 本当に消えるまで待つ。待たずに自分の daemon を起こすと、その間だけ二重に出る。
+.PHONY: brew-pause
+brew-pause:
+	@if launchctl print $(BREW_AGENT) >/dev/null 2>&1; then \
+	  echo "brew 常駐を退避する（plist は残すので、戻し忘れても次のログインで復活する）"; \
+	  launchctl bootout $(BREW_AGENT) 2>/dev/null || true; \
+	  for i in 1 2 3 4 5 6 7 8 9 10; do \
+	    launchctl print $(BREW_AGENT) >/dev/null 2>&1 || break; \
+	    sleep 0.3; \
+	  done; \
+	fi
+
+# 「plist は在るのに service が居ない」＝退避中、という判定。ユーザが自分で
+# `brew services stop` した場合は plist ごと消えるので、ここは何もしない
+# （＝ユーザが明示的に止めたものを勝手に起こさない。ADR 0021 の流儀）。
+.PHONY: brew-resume
+brew-resume:
+	@if [ -f "$(BREW_PLIST)" ] && ! launchctl print $(BREW_AGENT) >/dev/null 2>&1; then \
+	  echo "brew 常駐を戻す"; \
+	  launchctl bootstrap gui/$(UID) "$(BREW_PLIST)" 2>/dev/null || true; \
+	fi
+
+# ---------------------------------------------------------------------------
 # 見た目の高速ループ
 # ---------------------------------------------------------------------------
 
 .PHONY: dev
 dev: ## 走行中の daemon を止め→build→dev binary を起動（install 不要）
 	-@pkill -f '$(DAEMON_DEV)' 2>/dev/null || true
+	-@pkill -f '$(DAEMON_PRE)' 2>/dev/null || true
 	-@launchctl bootout $(AGENT) 2>/dev/null || true
+	@$(MAKE) --no-print-directory brew-pause
 	@$(CARGO) build -q -p ccsessionsd
 	@$(DAEMON_DEV) >/tmp/ccsessionsd-dev.log 2>&1 &
 	@echo "ccsessionsd(dev) 起動。theme.rs を直して 'make dev' を繰り返す。log: /tmp/ccsessionsd-dev.log"
@@ -52,7 +98,9 @@ dev: ## 走行中の daemon を止め→build→dev binary を起動（install �
 .PHONY: demo
 demo: ## 6 状態のダミーセッションを出して見た目を確認する（実セッション不要）
 	-@pkill -f '$(DAEMON_DEV)' 2>/dev/null || true
+	-@pkill -f '$(DAEMON_PRE)' 2>/dev/null || true
 	-@launchctl bootout $(AGENT) 2>/dev/null || true
+	@$(MAKE) --no-print-directory brew-pause
 	@$(CARGO) build -q -p ccsessionsd
 	@$(DAEMON_DEV) --demo >/tmp/ccsessionsd-dev.log 2>&1 &
 	@echo "ccsessionsd(demo) 起動。log: /tmp/ccsessionsd-dev.log"
@@ -62,16 +110,12 @@ config: ## 設定と顔作りの Web UI を立ち上げる（127.0.0.1:8787）�
 	@$(CARGO) build -q -p ccsessions
 	@target/debug/ccsessions ui
 
-.PHONY: watch
-watch: ## ソース保存のたびに自動で make dev（要 watchexec）
-	@command -v watchexec >/dev/null 2>&1 || { echo "watchexec 未導入: brew install watchexec"; exit 1; }
-	watchexec -e rs -w ccsessionsd/src -- $(MAKE) dev
-
 .PHONY: stop
-stop: ## 走行中の ccsessionsd（dev / LaunchAgent 両方）を止める
+stop: ## 手元の ccsessionsd を全部止めて、退避してある brew 常駐を戻す
 	-@pkill -f '$(DAEMON_DEV)' 2>/dev/null || true
-	-@pkill -f '$(DAEMON)' 2>/dev/null || true
+	-@pkill -f '$(DAEMON_PRE)' 2>/dev/null || true
 	-@launchctl bootout $(AGENT) 2>/dev/null || true
+	@$(MAKE) --no-print-directory brew-resume
 	@echo "stopped"
 
 # ---------------------------------------------------------------------------
@@ -84,94 +128,15 @@ check: ## fmt --check + clippy -D warnings + test
 	$(CARGO) clippy --all-targets -- -D warnings
 	$(CARGO) test
 
-.PHONY: fmt
-fmt: ## cargo fmt
-	$(CARGO) fmt --all
-
 .PHONY: test
 test: ## 全テスト（unit + 統合）
 	$(CARGO) test
-
-.PHONY: unit-test
-unit-test: ## unit テストだけ（各 crate の #[cfg(test)]。速い）
-	$(CARGO) test --lib --bins
 
 # 実プロセスを起動して hook の契約（exit 0・stdout 無言・並列書き込み）を見るテスト。
 # ライブラリの単体テストでは再現できない性質なので分けてある。
 .PHONY: integration-test
 integration-test: ## CLI 統合テスト（ccsessions/tests/cli.rs。実プロセスを起動する）
 	$(CARGO) test -p ccsessions --test cli
-
-# ---------------------------------------------------------------------------
-# インストール / 常駐
-# ---------------------------------------------------------------------------
-
-.PHONY: install
-install: ## release ビルドして ~/.cargo/bin へ入れる
-	$(CARGO) install --path ccsessions --force
-	$(CARGO) install --path ccsessionsd --force
-
-.PHONY: plist
-plist: ## LaunchAgent の plist を書き出す（常時起動・ログイン時起動）
-	@mkdir -p $(HOME)/Library/LaunchAgents
-	@# launchd は**ディレクトリを作らない**。無ければリダイレクトが黙って失敗し、
-	@# ログの出ない daemon になる。plist と同時に必ず用意する。
-	@mkdir -p $(LOGDIR)
-	@printf '%s\n' \
-	  '<?xml version="1.0" encoding="UTF-8"?>' \
-	  '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-	  '<plist version="1.0">' \
-	  '<dict>' \
-	  '  <key>Label</key><string>$(LABEL)</string>' \
-	  '  <key>ProgramArguments</key><array><string>$(DAEMON)</string></array>' \
-	  '  <key>RunAtLoad</key><true/>' \
-	  '  <key>KeepAlive</key><true/>' \
-	  '  <key>StandardOutPath</key><string>$(LOGDIR)/ccsessionsd.log</string>' \
-	  '  <key>StandardErrorPath</key><string>$(LOGDIR)/ccsessionsd.err</string>' \
-	  '</dict>' \
-	  '</plist>' > $(PLIST)
-	@echo "wrote $(PLIST)"
-
-# start は**ビルドしない**。使いたいだけの人が daemon を起こすたびに release
-# ビルドの数十秒を払うのはおかしいので、ビルドを伴う導線は install / deploy に
-# 分けてある（deploy = install + restart）。plist の書き出しは瞬時で冪等なので
-# start 側に置き、消えていても自力で直せるようにしてある。
-.PHONY: start
-start: plist ## 導入済みの ccsessionsd を常駐開始する（ビルドしない）
-	@test -x $(DAEMON) \
-	  || { echo "$(DAEMON) が無い。先に 'make install'（or 'make deploy'）を実行する"; exit 1; }
-	@if launchctl print $(AGENT) >/dev/null 2>&1; then \
-	  echo "ccsessionsd はもう稼働中（バイナリを入れ替えるなら 'make deploy'）"; \
-	else \
-	  launchctl bootstrap gui/$(UID) $(PLIST) \
-	    || { echo "bootstrap に失敗した。'launchctl print $(AGENT)' で状態を見る"; exit 1; }; \
-	  sleep 1; \
-	  launchctl print $(AGENT) >/dev/null 2>&1 \
-	    && echo "ccsessionsd を常駐させた。ログ: $(LOGDIR)/ccsessionsd.log" \
-	    || { echo "ccsessionsd が起動していない。ログ: $(LOGDIR)/ccsessionsd.err"; exit 1; }; \
-	fi
-
-# launchctl の bootout は**非同期**で、直後に bootstrap すると
-# "Bootstrap failed: 5: Input/output error" で失敗し、daemon が居ないまま
-# 静かに終わる（実際に踏んだ）。サービスが本当に消えるまで待ってから起こす。
-.PHONY: restart
-restart: ## 常駐を入れ替える（bootout の完了を待ってから start）
-	-@launchctl bootout $(AGENT) 2>/dev/null || true
-	@for i in 1 2 3 4 5 6 7 8 9 10; do \
-	  launchctl print $(AGENT) >/dev/null 2>&1 || break; \
-	  sleep 0.3; \
-	done
-	@$(MAKE) --no-print-directory start
-
-.PHONY: deploy
-deploy: install plist ## ビルドして入れ直し、常駐を入れ替える（更新の反映）
-	@$(MAKE) --no-print-directory restart
-
-.PHONY: uninstall
-uninstall: stop ## 常駐解除 + plist 削除（hook はプラグイン側なので触らない）
-	-@rm -f $(PLIST)
-	@echo "uninstalled（バイナリは ~/.cargo/bin に残る: cargo uninstall ccsessions ccsessionsd）"
-	@echo "hook を外すには Claude Code で /plugin uninstall ccsessions@ccsessions-marketplace"
 
 # ---------------------------------------------------------------------------
 # リリース
@@ -182,6 +147,38 @@ uninstall: stop ## 常駐解除 + plist 削除（hook はプラグイン側な�
 # あちらも一緒に動かす。
 CARGO_TOML  := Cargo.toml
 PLUGIN_JSON := plugins/ccsessions/.claude-plugin/plugin.json
+
+# `preview` と `release` が共有する前提。「見たもの＝出るもの」を保証する 1 か所で、
+# ここがずれていると、未レビューの変更を目視してリリースしたつもりになる。
+# ヘルプには出さない（人間が直接叩くものではない）。
+.PHONY: main-sync
+main-sync:
+	@test -z "$$(git status --porcelain)" \
+	  || { echo "作業ツリーが汚れている。commit か stash をしてから実行する"; exit 1; }
+	@git fetch --quiet origin main
+	@test "$$(git rev-parse HEAD)" = "$$(git rev-parse origin/main)" \
+	  || { echo "HEAD が origin/main と違う。main を最新にしてから実行する（手元の枝を見るなら 'make dev'）"; exit 1; }
+
+# 「そろそろリリースするか」の 1 コマンド。brew で入るものと同じ release ビルドを
+# 起こす（`make dev` の debug ビルドは速さのためのもので、配るものではない）。
+# brew 常駐は `brew-pause` が退避するので二重に出ない。
+.PHONY: preview
+preview: main-sync ## main のコードを production と同じ形で起動して目視する（brew 常駐は退避）
+	-@pkill -f '$(DAEMON_DEV)' 2>/dev/null || true
+	-@pkill -f '$(DAEMON_PRE)' 2>/dev/null || true
+	-@launchctl bootout $(AGENT) 2>/dev/null || true
+	@$(MAKE) --no-print-directory brew-pause
+	@echo "release ビルド中（初回は数分）…"
+	@$(CARGO) build -q --release -p ccsessionsd -p ccsessions
+	@$(DAEMON_PRE) >/tmp/ccsessionsd-preview.log 2>&1 &
+	@echo ""
+	@echo "  $$(git log -1 --format='%h %s') を production と同じ形で起動した。"
+	@echo "  設定と顔:  target/release/ccsessions ui"
+	@echo "  導入状況:  target/release/ccsessions doctor"
+	@echo "  log:       /tmp/ccsessionsd-preview.log"
+	@echo ""
+	@echo "  OK なら:   make release VERSION=x.y.z （preview を畳んで Release PR を出す）"
+	@echo "  やめる:    make stop                  （brew 常駐が戻る）"
 
 # `make release` は **PR を出すところで止まる**。タグを打つのも tap を更新するのも
 # `.github/workflows/release.yml` で、引き金は「この PR がマージされたこと」。
@@ -195,13 +192,14 @@ release: ## Release PR を出す（make release VERSION=x.y.z）。タグは CI 
 	@printf '%s' '$(VERSION)' | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$$' \
 	  || { echo "VERSION は x.y.z の 3 つ組で書く（'v' は付けない）: '$(VERSION)'"; exit 1; }
 	@command -v gh >/dev/null 2>&1 || { echo "gh が無い: brew install gh"; exit 1; }
-	@test -z "$$(git status --porcelain)" \
-	  || { echo "作業ツリーが汚れている。commit か stash をしてから実行する"; exit 1; }
+	@# preview を畳んで production を戻してからリリースに入る。ここでやるのは
+	@# 「`make preview` して OK だったので出す」が 1 本の流れになるようにするため。
+	@# 版の書式が間違っているときは畳む前に落としたいので、この位置に置いてある。
+	-@pkill -f '$(DAEMON_PRE)' 2>/dev/null || true
+	@$(MAKE) --no-print-directory brew-resume
 	@# リリースブランチは origin/main から生やす。ここがずれていると、まだ
-	@# レビューされていない変更をリリースに巻き込む。
-	@git fetch --quiet origin main
-	@test "$$(git rev-parse HEAD)" = "$$(git rev-parse origin/main)" \
-	  || { echo "HEAD が origin/main と違う。main を最新にしてから実行する"; exit 1; }
+	@# レビューされていない変更をリリースに巻き込む（`preview` と同じ前提）。
+	@$(MAKE) --no-print-directory main-sync
 	@if git ls-remote --exit-code --tags origin 'refs/tags/v$(VERSION)' >/dev/null 2>&1; then \
 	  echo "タグ v$(VERSION) は既にある。上げる版を指定する"; exit 1; \
 	fi

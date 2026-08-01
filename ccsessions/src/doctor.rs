@@ -208,8 +208,9 @@ fn cwd_or_dot() -> PathBuf {
 /// `~/Library/LaunchAgents/<label>.plist` なので、ラベルからファイル名が決まる。
 ///
 /// 旧名のラベルを載せてあるのは、`ccstatus` から改名したときに**旧 plist が
-/// そのまま残る**ため。`brew services` と `make start` の衝突より、まず
-/// この新旧の併走が起きる。
+/// そのまま残る**ため。同じ理由で `dev.ccsessions.ccsessionsd` も載せ続ける —
+/// これを置いていた `make start` は消したが（[ADR 0028](../../docs/adr/0028-preview-parks-the-brew-daemon.md)）、
+/// 既に置かれた plist は消えないので、検出は残す必要がある。
 struct Residency {
     label: &'static str,
     /// この plist を書く主体。ユーザが「どっちを消すか」を決めるのに要る。
@@ -222,7 +223,7 @@ struct Residency {
 const RESIDENCIES: &[Residency] = &[
     Residency {
         label: "dev.ccsessions.ccsessionsd",
-        origin: "make start",
+        origin: "make start, which no longer exists",
         legacy: false,
     },
     Residency {
@@ -285,9 +286,10 @@ fn residency_lines(installed: &[&'static Residency], running: Option<usize>) -> 
                         .to_string(),
                 );
                 out.push(
-                    "                   none of the new config or hooks. `make stop`, then `make start`"
+                    "                   none of the new config or hooks. `make stop`, then"
                         .to_string(),
                 );
+                out.push("                   `brew services start ccsessions`".to_string());
             }
         }
         many => {
@@ -314,8 +316,10 @@ fn residency_lines(installed: &[&'static Residency], running: Option<usize>) -> 
         Some(n) if n > 1 => out.push(format!(
             "                 ⚠ {n} daemons are running (including a `make dev` left behind)"
         )),
-        Some(0) if !installed.is_empty() => out
-            .push("                 ⚠ Set up but not running (`make start` to begin)".to_string()),
+        Some(0) if !installed.is_empty() => out.push(
+            "                 ⚠ Set up but not running (`brew services start ccsessions`)"
+                .to_string(),
+        ),
         _ => {}
     }
     out

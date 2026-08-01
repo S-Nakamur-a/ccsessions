@@ -186,17 +186,26 @@ ccsessions hook                 # Claude Code の hook が呼ぶ（stdin から 
 ## 開発
 
 ```sh
-make check   # fmt --check + clippy -D warnings + test（コミット前の品質ゲート）
-make dev     # 走行中の常駐を止めて build → dev バイナリを起動（install 不要）
-make demo    # 6 状態のダミーセッションで見た目を確認（実セッション不要）
-make help    # ターゲット一覧
+make check    # fmt --check + clippy -D warnings + test（コミット前の品質ゲート）
+make dev      # 走行中の常駐を止めて build → dev バイナリを起動（install 不要）
+make demo     # 6 状態のダミーセッションで見た目を確認（実セッション不要）
+make preview  # main のコードを production と同じ形（release ビルド）で起動する
+make stop     # ここで起こしたものを全部止めて、brew 常駐を戻す
+make help     # ターゲット一覧
 ```
 
 前提は [rustup](https://rustup.rs/) の Rust ツールチェイン（MSRV 1.89）です。
-`make install` で `~/.cargo/bin` へ入れ、`make start` で常駐します。
-`brew services` と両方で常駐させると生き物が二重に出るので、どちらか一方にしてください
-（`ccsessions doctor` が検出します）。hook は開発中もプラグインで入れます —
-チェックアウトをそのまま marketplace として使えるので、`/plugin marketplace add .`
+
+**常駐は brew のものだけです。** `make install` / `make start` はありません — 常駐の
+入口が 2 つあることが「生き物が二重に出る」の原因だったためです。手元のビルドを見る
+ときは `make dev`（debug）か `make preview`（release）で、どちらも brew 常駐を退避して
+から起動します（`launchctl bootout`。plist は残します）。戻すのは `make stop` または
+`make release` で、戻し忘れても次のログインで復活します。Makefile を通さず手で起こした
+場合は面倒を見ません（`ccsessions doctor` が二重を検出します）。
+詳細は [ADR 0028](docs/adr/0028-preview-parks-the-brew-daemon.md)。
+
+hook は開発中もプラグインで入れます — チェックアウトをそのまま marketplace として
+使えるので、`/plugin marketplace add .`
 → `/plugin install ccsessions@ccsessions-marketplace` としてください。
 
 README を直したときは、英語版（[`README.md`](README.md)）と日本語版（このファイル）の

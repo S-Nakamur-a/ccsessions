@@ -85,7 +85,10 @@ jobs:
       TAP_RAW: https://raw.githubusercontent.com/S-Nakamur-a/homebrew-tap/main/Formula/ccsessions.rb
       HOMEBREW_NO_AUTO_UPDATE: 1
     steps:
+      # ずれ検査が「この変更が写しを触ったか」を見るので履歴が要る（下の step）。
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       # ruby の構文・スタイル崩れを**リリース当日ではなくレビュー時**に落とす。
       # `--online` は付けない（前回リリースの URL を毎 PR で叩く必要は無い）。
@@ -112,9 +115,32 @@ jobs:
       #
       # 残るのは formula の実体（依存・install・service・caveats・test）で、
       # ここがずれたら brew の挙動が変わる。
+      #
+      # **この変更が写しそのものを編集しているなら、比較は飛ばす。** tap は
+      # リリースのときにしか動かない（`release.yml` が写しから上書きする）ので、
+      # 写しを直した瞬間から次のリリースまで、この検査は必ず赤になる。それでは
+      # formula を一切直せない。「意図した編集」と「片方だけ直したドリフト」は
+      # 内容の diff では区別できないが、**この変更が写しに触ったか**でなら機械的に
+      # 区別できる。触っていればレビューの diff に載っているし、触っていないのに
+      # ずれていれば tap 側が手で書き換えられたということで、それが本当に捕まえたい事故。
       - name: 写しと tap がずれていないか
+        env:
+          # 式は run に直接埋めず env 経由で渡す（GitHub Actions の定石。
+          # ここで使う 2 つは攻撃者が握れる値ではないが、形を揃えておく）。
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only "origin/$BASE_REF...HEAD")
+          else
+            CHANGED=$(git diff --name-only HEAD^ HEAD)
+          fi
+          if printf '%s\n' "$CHANGED" | grep -qxF "$FORMULA"; then
+            echo "この変更は $FORMULA を編集している。tap との比較は飛ばす"
+            echo "（リリース時に release.yml が写しの内容を tap へ反映する）"
+            exit 0
+          fi
           curl -fsSL --retry 3 --retry-delay 2 "$TAP_RAW" -o /tmp/tap-ccsessions.rb
           strip() { grep -vE '^[[:space:]]*#|^  (url|sha256) "' "$1"; }
           if ! diff -u <(strip /tmp/tap-ccsessions.rb) <(strip "$FORMULA"); then
