@@ -121,6 +121,37 @@ ccsessions doctor        # いま何件隠れているかを確認できます
 
 バッジはそのセッションが走らせているエージェントの数です。
 
+## 更新する
+
+半分ずつです。バイナリは brew から、hook はプラグインから来ます。
+
+```sh
+brew update && brew upgrade ccsessions
+```
+
+常駐は brew が入れ替えてくれます。続いて Claude Code の中で（適用には再起動が要ります）:
+
+```
+/plugin update ccsessions@ccsessions-marketplace
+```
+
+<details>
+<summary><code>brew upgrade</code> が何も言わないとき</summary>
+
+`brew update` は tap から formula を写しますが、tap が更新されるのはリリースの最後です。
+リリースが告知された直後に打つと、その直前の状態を取ってしまい、続く `brew upgrade` は
+黙って何もしません。
+
+```sh
+brew outdated ccsessions   # 新しい版を認識していれば名前が出ます
+brew list --versions ccsessions
+```
+
+まだ認識していなければ `brew update` をやり直してください。source formula
+（[ADR 0021](docs/adr/0021-distribution.md)）なので、upgrade 自体はソースからのビルドで
+数分かかります。
+</details>
+
 ## やめる・消す
 
 | したいこと | コマンド |

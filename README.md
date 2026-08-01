@@ -128,6 +128,37 @@ settings are never reset because of it. You can also edit the list in
 
 The badge is the number of agents that session is running.
 
+## Updating
+
+Two halves: the binaries come from brew, the hooks come from the plugin.
+
+```sh
+brew update && brew upgrade ccsessions
+```
+
+brew restarts the daemon for you. Then, inside Claude Code — it applies after a restart:
+
+```
+/plugin update ccsessions@ccsessions-marketplace
+```
+
+<details>
+<summary>If <code>brew upgrade</code> says nothing changed</summary>
+
+`brew update` copies the formula from the tap, and the tap is pushed at the very end of a
+release. Run it in the first minute after a release is announced and you get the state
+from just before it, after which `brew upgrade` quietly finds nothing to do.
+
+```sh
+brew outdated ccsessions   # prints the name if brew has seen a newer version
+brew list --versions ccsessions
+```
+
+If brew has not seen it yet, `brew update` again. This is a source formula
+([ADR 0021](docs/adr/0021-distribution.md)), so the upgrade itself builds from source and
+takes a few minutes.
+</details>
+
 ## Stopping and uninstalling
 
 | What you want | Command |
