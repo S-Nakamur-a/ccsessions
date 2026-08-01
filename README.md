@@ -134,9 +134,10 @@ Two halves: the binaries come from brew, the hooks come from the plugin.
 
 ```sh
 brew update && brew upgrade ccsessions
+brew services restart ccsessions
 ```
 
-brew restarts the daemon for you. Then, inside Claude Code — it applies after a restart:
+Then, inside Claude Code — it applies after a restart:
 
 ```
 /plugin update ccsessions@ccsessions-marketplace

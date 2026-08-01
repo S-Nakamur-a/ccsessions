@@ -127,9 +127,10 @@ ccsessions doctor        # いま何件隠れているかを確認できます
 
 ```sh
 brew update && brew upgrade ccsessions
+brew services restart ccsessions
 ```
 
-常駐は brew が入れ替えてくれます。続いて Claude Code の中で（適用には再起動が要ります）:
+続いて Claude Code の中で（適用には再起動が要ります）:
 
 ```
 /plugin update ccsessions@ccsessions-marketplace
