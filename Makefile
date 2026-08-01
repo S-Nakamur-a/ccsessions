@@ -174,6 +174,66 @@ uninstall: stop ## 常駐解除 + plist 削除（hook はプラグイン側な�
 	@echo "hook を外すには Claude Code で /plugin uninstall ccsessions@ccsessions-marketplace"
 
 # ---------------------------------------------------------------------------
+# リリース
+# ---------------------------------------------------------------------------
+
+# 版を持っているファイルはこの 2 つだけ。**`release.yml` の guard ジョブが
+# 「この 2 つが同じ版であること」を毎リリース検証する**ので、増やすときは
+# あちらも一緒に動かす。
+CARGO_TOML  := Cargo.toml
+PLUGIN_JSON := plugins/ccsessions/.claude-plugin/plugin.json
+
+# `make release` は **PR を出すところで止まる**。タグを打つのも tap を更新するのも
+# `.github/workflows/release.yml` で、引き金は「この PR がマージされたこと」。
+# 人間が `main` へ直接書く操作をリリース手順から無くすため（docs/adr/0025）。
+#
+# sed は BSD 版（`-i ''`）。このリポジトリは macOS 専用なので揃えてある。
+.PHONY: release
+release: ## Release PR を出す（make release VERSION=x.y.z）。タグは CI が打つ
+	@test -n "$(VERSION)" \
+	  || { echo "VERSION が要る（例: make release VERSION=0.1.2）"; exit 1; }
+	@printf '%s' '$(VERSION)' | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$$' \
+	  || { echo "VERSION は x.y.z の 3 つ組で書く（'v' は付けない）: '$(VERSION)'"; exit 1; }
+	@command -v gh >/dev/null 2>&1 || { echo "gh が無い: brew install gh"; exit 1; }
+	@test -z "$$(git status --porcelain)" \
+	  || { echo "作業ツリーが汚れている。commit か stash をしてから実行する"; exit 1; }
+	@# リリースブランチは origin/main から生やす。ここがずれていると、まだ
+	@# レビューされていない変更をリリースに巻き込む。
+	@git fetch --quiet origin main
+	@test "$$(git rev-parse HEAD)" = "$$(git rev-parse origin/main)" \
+	  || { echo "HEAD が origin/main と違う。main を最新にしてから実行する"; exit 1; }
+	@if git ls-remote --exit-code --tags origin 'refs/tags/v$(VERSION)' >/dev/null 2>&1; then \
+	  echo "タグ v$(VERSION) は既にある。上げる版を指定する"; exit 1; \
+	fi
+	@if grep -q '^version = "$(VERSION)"$$' $(CARGO_TOML); then \
+	  echo "$(CARGO_TOML) は既に $(VERSION)。上げる版を指定する"; exit 1; \
+	fi
+	@git switch -q -c release/v$(VERSION)
+	@sed -i '' -E 's/^version = "[0-9]+\.[0-9]+\.[0-9]+"$$/version = "$(VERSION)"/' $(CARGO_TOML)
+	@sed -i '' -E 's/"version": "[0-9]+\.[0-9]+\.[0-9]+"/"version": "$(VERSION)"/' $(PLUGIN_JSON)
+	@# 置換できたことを読み直して確かめる。ファイルの構造が変わったのに sed が
+	@# 黙って何もせず、版が上がらないまま Release PR が出る事故を防ぐ。
+	@grep -q '^version = "$(VERSION)"$$' $(CARGO_TOML) \
+	  || { echo "$(CARGO_TOML) の version を書き換えられなかった（[workspace.package] の形が変わった？）"; exit 1; }
+	@grep -q '"version": "$(VERSION)"' $(PLUGIN_JSON) \
+	  || { echo "$(PLUGIN_JSON) の version を書き換えられなかった"; exit 1; }
+	@# workspace の 3 エントリを Cargo.lock に追従させる。**`--locked` を付けない
+	@# 唯一の場所**（ci.yml も release.yml の guard も付ける側）。
+	@$(CARGO) metadata --format-version 1 >/dev/null
+	@git add $(CARGO_TOML) $(PLUGIN_JSON) Cargo.lock
+	@git commit -q -m "release: v$(VERSION)"
+	@git push -q -u origin release/v$(VERSION)
+	@gh pr create --title "release: v$(VERSION)" --body "$$(printf '%s\n' \
+	  'この PR をマージするとリリースが走ります（.github/workflows/release.yml）。' \
+	  '' \
+	  '1. CI がタグ v$(VERSION) を打つ' \
+	  '2. tarball の sha256 を取って formula をレンダリングし、実際に brew install と brew test を通す' \
+	  '3. 緑のときだけ tap（S-Nakamur-a/homebrew-tap）を更新して GitHub Release を作る' \
+	  '' \
+	  '人間がタグを打つ操作はありません。途中で失敗したらタグは消えるので、直して同じ版でやり直せます。')"
+	@echo "Release PR を出した。CI が緑なのを見てマージすると v$(VERSION) が公開される。"
+
+# ---------------------------------------------------------------------------
 
 .PHONY: help
 help: ## このヘルプ

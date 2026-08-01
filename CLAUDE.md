@@ -98,10 +98,18 @@ store を更新する。`settings_json.rs` は `~/.claude/settings.json` を**�
 `sha256` 埋めまで済んでいて、`brew install S-Nakamur-a/tap/ccsessions` と
 `/plugin marketplace add S-Nakamur-a/ccsessions` の両方が実際に通る。
 
-リリースのたびに要るのは、タグを切る → tarball の `sha256` を取る →
-`packaging/homebrew/ccsessions.rb`（原本）の `url` / `sha256` を差し替える →
-tap の `Formula/ccsessions.rb` へコピー、の 4 手。**原本と tap の 2 か所に同じ
-formula がある**ので、片方だけ直すとずれる。
+リリースは `make release VERSION=x.y.z` の 1 コマンド
+（[`docs/adr/0027-release-automation.md`](docs/adr/0027-release-automation.md)）。
+これは版を上げた **Release PR を出すところで止まる**。引き金は**その PR をマージする
+こと**で、そこから先（タグを打つ → tarball の `sha256` を取る → formula を
+レンダリングする → **実際に `brew install` と `brew test` を通す** → tap を更新して
+GitHub Release を作る）は `.github/workflows/release.yml` がやる。
+**人間も `make` もタグを打たない。** 手作業は `TAP_TOKEN`（tap への fine-grained
+PAT）をシークレットに入れる一度きりの設定だけ。
+
+formula の実体は tap の `Formula/ccsessions.rb` で、
+`packaging/homebrew/ccsessions.rb` は**レビュー用の写し**。`url` / `sha256` の 2 行は
+CI が tap 側に書くので手で直さない。それ以外がずれたら PR の CI が落とす。
 
 イベント一覧と timeout は Rust の定数と `hooks.json` の 2 か所にある。**真実は
 `settings_json.rs` の `SIMPLE_EVENTS` / `hook_timeout_secs` の 1 か所**で、

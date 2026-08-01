@@ -69,3 +69,56 @@ jobs:
       # clippy を MSRV で回すと、コードの問題ではない失敗が出る。
       - name: cargo check
         run: cargo check --all-targets --locked
+
+  # formula が壊れていることに**ユーザが `brew install` して初めて気づく**のを避ける。
+  # ここで見るのはレビュー時に落とせるもの（構文・スタイル・tap とのずれ）だけで、
+  # 「実際にビルドとインストールが通るか」はリリース時に `release.yml` が見る
+  # （毎 PR で cargo build をまるごと回すのは高すぎる）。
+  formula:
+    name: formula（style + audit + tap とのずれ）
+    runs-on: macos-15
+    defaults:
+      run:
+        shell: bash
+    env:
+      FORMULA: packaging/homebrew/ccsessions.rb
+      TAP_RAW: https://raw.githubusercontent.com/S-Nakamur-a/homebrew-tap/main/Formula/ccsessions.rb
+      HOMEBREW_NO_AUTO_UPDATE: 1
+    steps:
+      - uses: actions/checkout@v5
+
+      # ruby の構文・スタイル崩れを**リリース当日ではなくレビュー時**に落とす。
+      # `--online` は付けない（前回リリースの URL を毎 PR で叩く必要は無い）。
+      #
+      # **パス指定では呼べない。** `brew audit <path>` は Homebrew 側で無効化されて
+      # いる（"Calling `brew audit [path ...]` is disabled!"）し、`brew style <path>`
+      # はパスだと formula ではなくただの ruby として見るので、Sorbet sigil や
+      # frozen_string_literal といった formula には無関係な指摘を出す。
+      # **使い捨ての tap に置いて名前で呼ぶ**のが唯一の通し方。
+      - name: brew style + audit
+        run: |
+          set -euo pipefail
+          brew tap-new --no-git local/ci
+          cp "$FORMULA" "$(brew --repository local/ci)/Formula/ccsessions.rb"
+          brew style local/ci/ccsessions
+          brew audit --strict --formula local/ci/ccsessions
+
+      # 「原本と tap の 2 か所に同じ formula があるので、片方だけ直すとずれる」を
+      # 機械が握る。比較から外すものが 2 つある。
+      #
+      # - **`url` / `sha256`** — tap 側が正で、`release.yml` がリリースのたびに書く。
+      # - **コメント** — 写しの側にだけ「これはレビュー用の写しで手で直さない」と
+      #   書く必要があり、そこは意図的にずれる（tap にとってその説明は嘘になる）。
+      #
+      # 残るのは formula の実体（依存・install・service・caveats・test）で、
+      # ここがずれたら brew の挙動が変わる。
+      - name: 写しと tap がずれていないか
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --retry-delay 2 "$TAP_RAW" -o /tmp/tap-ccsessions.rb
+          strip() { grep -vE '^[[:space:]]*#|^  (url|sha256) "' "$1"; }
+          if ! diff -u <(strip /tmp/tap-ccsessions.rb) <(strip "$FORMULA"); then
+            echo "::error::tap の formula と $FORMULA がずれている（上の diff。左が tap、右が写し）"
+            exit 1
+          fi
+          echo "写しと tap は一致している（url / sha256 とコメントを除く）"
