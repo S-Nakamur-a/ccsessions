@@ -41,7 +41,7 @@ crate / モジュール境界で分離する**のが全体の設計原理。デ�
 | `process.rs` | 持ち主 pid の生存確認（`kill` は POSIX、ゾンビ判定は macOS 固有） |
 | `config.rs` | 設定。**キー・型・選択肢・検証を `fields()` / `set_field()` に集約** |
 | `ignore/` | 一覧から外す条件（`parse` 検証 / `glob` 照合）。**表示のフィルタで、生死ではない** |
-| `face/` | 顔のデータモデル（`spec` / `parse` / `validate` / `registry` / `svg` / `golden`） |
+| `face/` | 顔のデータモデル（`spec` / `parse` / `validate` / `registry` / `svg` / `golden` / `palette`）。**色も顔が状態ごとに持つ**（`[colors.<状態>]`） |
 | `face/builder/` | キャラクタービルダー（`parts` パーツの表 / `shape` 幾何 / `emit` TOML 生成） |
 | `transcript.rs` | transcript の tail 読み。エラー判定（補助手段・既定 off）とセッションタイトル |
 
@@ -78,6 +78,7 @@ store を更新する。`settings_json.rs` は `~/.claude/settings.json` を**�
 | **brew 常駐の退避は `bootout`（`brew services kill` / `stop` は使わない）** | kill は exit 0 で何もせず二重に出る／stop は plist を消して常用のオーバーレイが黙って消える |
 | **設定の入口は Web UI だけ。スキーマは `fields()` の 1 か所** | 片方が腐る（設定が嘘をつく） |
 | **顔は `faces/*.toml` が唯一の定義** | `theme.rs` に顔ごとの分岐が戻り、顔を足すのに Rust が要る |
+| **色の上書きは状態ごとだけ。描く側は `FaceSpec::accent`/`fill`/`eye` を通す** | 6 状態が一色に潰れて状態が読めなくなる／1 匹の中で枠とカードの色が食い違う |
 
 「なぜ他の案を採らなかったのか」は [`docs/adr/`](docs/adr/README.md)。
 

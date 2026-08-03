@@ -10,6 +10,7 @@
 use objc2::rc::Retained;
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATransaction};
 
+use ccsessions_core::face::FaceSpec;
 use ccsessions_core::session::SessionState;
 
 use crate::anim;
@@ -56,8 +57,11 @@ const DUR_GAP: f64 = 14.0;
 const ROW_GAP: f64 = 6.0;
 
 /// カードを組む。`size` は bar / dock（背景色がわずかに違う）。
-pub fn build(v: &CardView, size: Size, scale: f64, reduce_motion: bool) -> Card {
-    let accent = theme::accent(v.state);
+/// `face` は色を引くためだけに要る。**カードの縁とドットは生き物と同じ色**でなければ
+/// ならず（同じ状態を指しているので）、顔が `[colors.<状態>]` を持っていれば
+/// そちらが真実になる。
+pub fn build(v: &CardView, size: Size, scale: f64, reduce_motion: bool, face: &FaceSpec) -> Card {
+    let accent = face.accent(v.state);
 
     // --- 大きさを見積もる -------------------------------------------------
     let name_w = text_width(&v.name, theme::CARD_TITLE_FONT);
@@ -189,7 +193,7 @@ pub fn build(v: &CardView, size: Size, scale: f64, reduce_motion: bool) -> Card 
     let rows_top = title_y - subtitle_h;
     for (i, a) in v.agents.iter().enumerate() {
         let y = rows_top - theme::CARD_ROW_H * (i as f64 + 1.0);
-        add_agent_row(&layer, a, y, scale, reduce_motion);
+        add_agent_row(&layer, a, y, scale, reduce_motion, face);
     }
 
     Card {
@@ -200,8 +204,15 @@ pub fn build(v: &CardView, size: Size, scale: f64, reduce_motion: bool) -> Card 
 }
 
 /// agent 1 行（状態ドット + 名前 + 役割）を `y` の高さに敷く。
-fn add_agent_row(layer: &CALayer, a: &AgentRow, y: f64, scale: f64, reduce_motion: bool) {
-    let c = theme::accent(a.state);
+fn add_agent_row(
+    layer: &CALayer,
+    a: &AgentRow,
+    y: f64,
+    scale: f64,
+    reduce_motion: bool,
+    face: &FaceSpec,
+) {
+    let c = face.accent(a.state);
 
     // 状態ドット。作業中は小刻みに震え、エラーはゆっくり明滅する（元デザインの dotStyle）。
     let dot = solid_layer(c, 1.0, theme::DOT_SIZE / 2.0);

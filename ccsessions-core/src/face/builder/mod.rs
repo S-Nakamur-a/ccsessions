@@ -19,12 +19,11 @@
 //! **1. TOML テキストを唯一の中間形にする。** `FaceSpec` を直接組まないのは、
 //! プレビューと保存されるファイルが食い違う余地を消すため（`emit.rs` の doc）。
 //!
-//! **2. 色は選ばせない（目を除く）。** 「色・アニメ・グリフは顔ごとに変えられない」
-//! は状態の読み取りやすさを守るための一線で、ビルダーのために緩めるものではない。
-//! **目の色だけはスキーマに実在する**
-//! （`eyes.states.*.color` の 4 値）ので、そこは本物として保存する。
-//! 肌・髪の色に相当するものは `SessionState` が決めるので、UI は 6 状態を
-//! 切り替えて実際の配色を見せる。
+//! **2. 色は「状態ごとに」選ばせる。** 守りたい一線は「色を変えられないこと」
+//! ではなく**「生き物を見れば状態が分かること」**なので、6 状態に一律で効く色は
+//! 用意せず、状態ごとに枠・面・目を選ばせる。全状態を同じ色で塗ることもできるが、
+//! それは 6 回選んだ結果であって、UI が黙ってそうするわけではない。
+//! 書かなかった状態は既定パレットのままなので、色を触らなければ見た目は変わらない。
 //!
 //! **3. どの組み合わせでも壊れないことを構造で担保する。** 30×30×30… の
 //! 組み合わせを人手で確認するのは無理なので、
@@ -44,8 +43,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::face::builder::emit::{DetailDraft, Draft, OutlineDraft};
 use crate::face::builder::parts::{EyeForm, Form};
-use crate::face::spec::{is_valid_id, Problem, ProblemCode, Source};
+use crate::face::palette;
+use crate::face::spec::{is_valid_id, Problem, ProblemCode, Source, StateColors};
 use crate::face::{validate, FaceSpec};
+use crate::session::SessionState;
 
 /// 設定ファイルのバージョン。**互換性を壊す変更を入れたら上げる。**
 pub const CONFIG_VERSION: u32 = 1;
@@ -151,9 +152,35 @@ pub struct CharacterConfig {
     pub parts: BTreeMap<String, String>,
     /// カテゴリ id → 微調整。書かなかったカテゴリは既定値。
     pub tweaks: BTreeMap<String, Tweak>,
-    /// 目の色。`"eye"`（既定）/ `"eye_closed"` / `"eye_error"` / `"white"`。
+    /// 状態名（`"working"` など）→ その状態の色。
+    ///
+    /// **書いた状態だけが顔の TOML に出る。** 触っていない状態は既定パレットの
+    /// ままなので、色を選ばずに作った顔の見た目は 0.2.0 と変わらない。
+    pub colors: BTreeMap<String, StateColorCfg>,
+    /// 旧「目の色」（`"eye"` / `"eye_closed"` / `"eye_error"` / `"white"`）。
+    ///
+    /// **読むためだけに残してある。** 0.2.0 までのビルダーで保存した顔を開き直したとき、
+    /// 選んでいた目の色が黙って消えないようにする（`legacy_eye_colors`）。
+    /// 新しく書き出すことはない。
     pub eye_color: String,
     pub preview: Preview,
+}
+
+/// 1 状態ぶんの色。**空文字は「指定なし」**（＝既定パレットに任せる）。
+///
+/// `Option<String>` ではなく空文字にしてあるのは、画面が「色を消す」を空文字の
+/// 送信で表すため。どちらか一方の表現に寄せておかないと、`null` と `""` の
+/// 両方を受ける羽目になる。読めない値も指定なしとして扱う（`parse_color`）ので、
+/// ここに何が入っていても顔は組み上がる。
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct StateColorCfg {
+    /// 枠・グロー・状態記号・バッジ・名前・ホバーカードの縁。
+    pub accent: String,
+    /// 体の面の塗り。
+    pub fill: String,
+    /// 目。
+    pub eye: String,
 }
 
 impl Default for CharacterConfig {
@@ -173,7 +200,8 @@ impl Default for CharacterConfig {
             author: None,
             parts,
             tweaks: BTreeMap::new(),
-            eye_color: "eye".into(),
+            colors: BTreeMap::new(),
+            eye_color: String::new(),
             preview: Preview::default(),
         }
     }
@@ -183,6 +211,44 @@ impl CharacterConfig {
     /// カテゴリのパーツ id。未指定ならそのカテゴリの既定（先頭）。
     pub fn part(&self, category: &str) -> &str {
         self.parts.get(category).map(String::as_str).unwrap_or("")
+    }
+
+    /// 状態の色（読めない値と空文字は「指定なし」に潰し済み）。
+    pub fn state_colors(&self, state: SessionState) -> StateColors {
+        let c = self.colors.get(state.as_str());
+        let pick = |f: fn(&StateColorCfg) -> &str| {
+            c.map(f)
+                .filter(|v| !v.is_empty())
+                .and_then(palette::parse_hex)
+        };
+        let mut out = StateColors {
+            accent: pick(|c| &c.accent),
+            fill: pick(|c| &c.fill),
+            eye: pick(|c| &c.eye),
+        };
+        // 旧「目の色」を引き継ぐ。**新しい指定が無い状態にだけ**当てる。
+        if out.eye.is_none() {
+            out.eye = self.legacy_eye_color(state);
+        }
+        out
+    }
+
+    /// 0.2.0 までの `eye_color`（4 値の名前）を、その状態の目の色に読み替える。
+    ///
+    /// 当時も**既定の色が `eye` である 3 状態にしか効いていなかった**
+    /// （見開きの白・アイドルの暗色・エラーの赤は塗り替えない、という判断）ので、
+    /// 読み替えも同じ 3 状態に閉じる。そうしないと、開き直した瞬間に顔が変わる。
+    fn legacy_eye_color(&self, state: SessionState) -> Option<crate::face::palette::Rgb> {
+        if !matches!(
+            state,
+            SessionState::Working | SessionState::WaitAgent | SessionState::Done
+        ) {
+            return None;
+        }
+        match self.eye_color.as_str() {
+            "" | "eye" => None,
+            other => crate::face::EyeColor::parse(other).map(|c| c.rgb()),
+        }
     }
 
     /// カテゴリの微調整（常識的な範囲へ丸め済み）。
@@ -353,12 +419,12 @@ fn draft_of(cfg: &CharacterConfig, eye_fit: f64, details: &[DetailDraft]) -> Dra
     };
     let eye_v = (fp.eye_v + et.dy).clamp(0.2, 0.8);
 
-    // ── 目の色 ──
-    // 既定（"eye"）のときは何も書かない。書くと既定ルールを置き換えてしまうため。
-    let eye_color = match cfg.eye_color.as_str() {
-        "eye" | "" => None,
-        other => crate::face::EyeColor::parse(other).map(|c| c.as_str()),
-    };
+    // ── 状態ごとの色 ──
+    // 選んでいない状態は空のまま ＝ `[colors.*]` に行が出ず、既定パレットで描かれる。
+    let mut colors = [StateColors::default(); 6];
+    for state in SessionState::ORDER {
+        colors[crate::face::spec::state_index(state)] = cfg.state_colors(state);
+    }
 
     Draft {
         id: cfg.id.trim().to_string(),
@@ -375,7 +441,7 @@ fn draft_of(cfg: &CharacterConfig, eye_fit: f64, details: &[DetailDraft]) -> Dra
             [ew * parts::DOCK_EYE_RATIO, eh * parts::DOCK_EYE_RATIO],
         ),
         eye_radius: radius,
-        eye_color,
+        colors,
         details: details.to_vec(),
         notes: notes_of(cfg),
         config_json: emit::inline_json(cfg),
@@ -491,7 +557,8 @@ pub fn random(seed: u64, keep: &CharacterConfig) -> CharacterConfig {
         let mut cfg = CharacterConfig {
             parts: BTreeMap::new(),
             tweaks: BTreeMap::new(),
-            eye_color: "eye".into(),
+            // **色は振り直さない**。名前や id と同じで、選んだ人の意思がある値なので
+            // 「形だけ振り直す」ボタンで消さない。
             ..keep.clone()
         };
         cfg.parts
@@ -691,6 +758,35 @@ mod tests {
         assert_eq!(again, c.spec, "TOML と描いている顔が食い違う");
     }
 
+    /// 色も同じ往復を通る。**書き出し（16 進の丸め）で色がずれると
+    /// 「画面で見た顔と保存される顔が別物」になる**ので、ここで固定する。
+    #[test]
+    fn the_generated_toml_round_trips_the_colours_too() {
+        let mut colors = BTreeMap::new();
+        colors.insert(
+            "working".to_string(),
+            StateColorCfg {
+                accent: "#7f3ac2".into(),
+                fill: "#241038".into(),
+                eye: "#00ff88".into(),
+            },
+        );
+        // 1 色だけ書いた状態も混ぜる（部分指定が往復すること）。
+        colors.insert(
+            "error".to_string(),
+            StateColorCfg {
+                accent: "#ff0044".into(),
+                ..StateColorCfg::default()
+            },
+        );
+        let c = compose(&CharacterConfig {
+            colors,
+            ..CharacterConfig::default()
+        });
+        let again = crate::face::parse::parse(&c.toml, Source::Builtin).expect("読み直せない");
+        assert_eq!(again, c.spec, "色が往復で変わっている\n{}", c.toml);
+    }
+
     /// 設定は TOML に埋め込まれ、読み戻せる（保存 → 再編集の経路）。
     #[test]
     fn the_config_round_trips_through_the_saved_toml() {
@@ -758,9 +854,10 @@ mod tests {
         assert_eq!(random(7, &base).parts, random(7, &base).parts);
     }
 
-    /// 目の色を変えても、瞬き・横目・状態の読み分けが生き残る。
+    /// **後方互換の番人**: 0.2.0 までの `eye_color`（4 値）で保存した顔を開き直しても、
+    /// 目の色は消えず、当時と同じ 3 状態にだけ効く。
     #[test]
-    fn recolouring_the_eyes_keeps_the_states_readable() {
+    fn a_face_saved_with_the_old_eye_colour_keeps_it() {
         let cfg = CharacterConfig {
             eye_color: "white".into(),
             ..CharacterConfig::default()
@@ -786,6 +883,76 @@ mod tests {
             c.spec.eye(SessionState::Error, Size::Bar).color,
             crate::face::palette::EYE_ERROR
         );
+    }
+
+    /// 状態ごとに選んだ色が、その状態の顔に出る。
+    #[test]
+    fn the_colours_chosen_per_state_reach_the_face() {
+        let mut colors = BTreeMap::new();
+        colors.insert(
+            "working".to_string(),
+            StateColorCfg {
+                accent: "#7f3ac2".into(),
+                fill: "#241038".into(),
+                eye: "#00ff88".into(),
+            },
+        );
+        let cfg = CharacterConfig {
+            colors,
+            ..CharacterConfig::default()
+        };
+        let c = compose(&cfg);
+        assert!(c.problems.is_empty(), "{:#?}", c.problems);
+        // 16 進の丸めに縛られないよう、比較は `palette` の変換を往復させる。
+        let hex = |c| crate::face::palette::to_hex(c);
+        assert_eq!(hex(c.spec.accent(SessionState::Working)), "#7f3ac2");
+        assert_eq!(hex(c.spec.fill(SessionState::Working)), "#241038");
+        assert_eq!(
+            hex(c.spec.eye(SessionState::Working, Size::Bar).color),
+            "#00ff88"
+        );
+        // 形は触っていない（`[colors.*]` は `[eyes.states.*]` と別の口）。
+        assert!(
+            c.spec.eye(SessionState::Working, Size::Bar).blink,
+            "色を選んだら瞬きが消えた"
+        );
+        // 選んでいない状態は既定パレットのまま。
+        assert_eq!(
+            c.spec.accent(SessionState::Error),
+            crate::face::palette::accent(SessionState::Error)
+        );
+    }
+
+    /// **読めない色は「指定なし」に落ちる**。UI から何が来ても顔は組み上がる。
+    #[test]
+    fn an_unreadable_colour_falls_back_to_the_default_palette() {
+        let mut colors = BTreeMap::new();
+        colors.insert(
+            "done".to_string(),
+            StateColorCfg {
+                accent: "reddish".into(),
+                fill: String::new(),
+                eye: "#".into(),
+            },
+        );
+        let cfg = CharacterConfig {
+            colors,
+            ..CharacterConfig::default()
+        };
+        let c = compose(&cfg);
+        assert!(c.problems.is_empty(), "{:#?}", c.problems);
+        assert_eq!(
+            c.spec.accent(SessionState::Done),
+            crate::face::palette::accent(SessionState::Done)
+        );
+    }
+
+    /// 色を 1 つも選ばなければ `[colors.*]` は 1 行も出ない
+    /// （＝ 0.2.0 の顔ファイルと同じテキストになる）。
+    #[test]
+    fn a_face_with_no_colours_writes_no_colour_table() {
+        let c = compose(&CharacterConfig::default());
+        assert!(!c.toml.contains("[colors."), "{}", c.toml);
     }
 
     /// 不正な id でもプレビューは生き残り、問題として報告される。

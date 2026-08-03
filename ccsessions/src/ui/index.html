@@ -80,14 +80,14 @@
     </div>
 
     <p class="hint" data-i18n="stage.stateHint">
-      色とアニメは<strong>状態</strong>が決める（顔ごとには変えられない）。
-      6 つ並べて実際の配色を確かめる。
+      色は<strong>状態ごと</strong>に決める。6 つ並べて配色を確かめ、
+      選んだ状態の色をその下で変える。アニメと記号は状態が決める（顔では変えられない）。
     </p>
     <div id="states"></div>
 
-    <label class="eyecolor"><span data-i18n="stage.eyeColor">目の色</span>
-      <select id="f-eyecolor"></select>
-    </label>
+    <!-- 選んだ状態の色。中身は /api/parts の color_slots から組み立てる
+         （この HTML には色の欄を 1 つも書かない）。 -->
+    <div id="state-colors"></div>
 
     <p id="fit" class="hint"></p>
   </section>

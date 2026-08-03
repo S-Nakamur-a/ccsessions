@@ -33,7 +33,9 @@ ccsessions ui
 ```
 
 A browser opens. Language, menu bar or bottom of the screen, how the creatures look, how
-long they stay — you decide all of that there. Building your own face happens here too.
+long they stay — you decide all of that there. Building your own face happens here too,
+including its colours: the outline, the fill, and the eyes are picked **per state**, so
+you can restyle the whole palette and still tell at a glance which state a creature is in.
 
 The settings, the character builder, and the hover card come in English and Japanese, and
 follow your OS language by default. Diagnostics (`ccsessions doctor`) are always English.

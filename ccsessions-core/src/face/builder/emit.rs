@@ -13,6 +13,10 @@
 
 use serde::Serialize;
 
+use crate::face::palette;
+use crate::face::spec::StateColors;
+use crate::session::SessionState;
+
 /// 輪郭の書き出し方（`[outline]` の 3 種にそのまま対応）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum OutlineDraft {
@@ -55,8 +59,9 @@ pub struct Draft {
     pub eye_size: ([f64; 2], [f64; 2]),
     /// 角丸半径（pt）。多角形の目では書き出さない。
     pub eye_radius: f64,
-    /// 目の色。`None` なら `[eyes.states.*]` を書かず既定ルールに任せる。
-    pub eye_color: Option<&'static str>,
+    /// 状態ごとの色。空の状態は `[colors.*]` に行を出さない
+    /// （＝その状態は既定パレットで描かれる）。
+    pub colors: [StateColors; 6],
     pub details: Vec<DetailDraft>,
     /// 先頭コメントに載せる説明（1 要素 1 行）。
     pub notes: Vec<String>,
@@ -172,21 +177,20 @@ pub fn to_toml(d: &Draft) -> String {
         }
     }
 
-    // 目の色を変えたときだけ状態を明示する。
-    //
-    // 既定ルールを**丸ごと置き換える**仕様（`EyeOverride` の doc）なので、
-    // 色だけ差し替えるつもりで書くと瞬きや横目が消える。既定と同じ挙動を
-    // 書き下したうえで色を足す。触るのは「既定の色が eye である 3 状態」だけで、
-    // 見開き（白）・アイドル（暗色）・エラー（赤）はそのままにする
-    // — そこまで塗ると状態が読めなくなる。
-    if let Some(color) = d.eye_color {
-        s.push_str("\n# 目の色を変えたので、既定ルールと同じ挙動を書き下したうえで色を足す。\n");
-        s.push_str("[eyes.states.working]\nblink = true\n");
-        s.push_str(&format!("color = \"{color}\"\n"));
-        s.push_str("\n[eyes.states.wait_agent]\ndx = 1.5\n");
-        s.push_str(&format!("color = \"{color}\"\n"));
-        s.push_str("\n[eyes.states.done]\n");
-        s.push_str(&format!("color = \"{color}\"\n"));
+    // 状態ごとの色。**`[eyes.states.*]` ではなく `[colors.*]` に書く**のが要点で、
+    // 前者は書くと既定ルールを丸ごと置き換えるので、色を変えるだけのつもりが
+    // 瞬きや横目を消してしまう。`[colors.*]` は形に一切触らない。
+    for state in SessionState::ORDER {
+        let c = d.colors[crate::face::spec::state_index(state)];
+        if c.is_empty() {
+            continue;
+        }
+        s.push_str(&format!("\n[colors.{}]\n", state.as_str()));
+        for (key, v) in [("accent", c.accent), ("fill", c.fill), ("eye", c.eye)] {
+            if let Some(v) = v {
+                s.push_str(&format!("{key} = \"{}\"\n", palette::to_hex(v)));
+            }
+        }
     }
 
     for det in &d.details {
@@ -316,7 +320,7 @@ mod tests {
             eye_gap: (3.0, 4.7),
             eye_size: ([3.0, 3.4], [4.7, 5.3]),
             eye_radius: 1.5,
-            eye_color: None,
+            colors: [StateColors::default(); 6],
             details: Vec::new(),
             notes: vec!["顔=capsule".into()],
             config_json: Some(r#"{"version":1,"id":"x"}"#.into()),

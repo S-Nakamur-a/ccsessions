@@ -26,9 +26,14 @@ use ccsessions_core::session::SessionState;
 /// core 側に置いてある。既存の呼び出し側を無変更で保つため、ここから re-export する。
 pub use ccsessions_core::face::{outline, Outline, Seg, Size};
 
-/// パレット（`Rgb` / `accent` / `face_fill` / 減光率 / 目の色）も同じ理由で
+/// パレット（`Rgb` / 減光率 / 目の色）も同じ理由で
 /// `ccsessions_core::face::palette` へ移設済み。ここから re-export する。
-pub use ccsessions_core::face::palette::{accent, face_fill, face_opacity, Rgb, EYE, INK};
+///
+/// **`accent` と `face_fill` はここから re-export しない。** 顔が
+/// `[colors.<状態>]` で状態ごとに上書きできるようになったので、描く側は必ず
+/// `FaceSpec::accent` / `FaceSpec::fill` を通す — `palette` を直に引くと、
+/// その経路だけ顔の色を無視して 1 匹の中で色が食い違う。
+pub use ccsessions_core::face::palette::{face_opacity, Rgb, EYE, INK};
 
 /// 枠線幅とパネル線の太さ・濃さも SVG プレビューと共有する（`face::style`）。
 pub use ccsessions_core::face::style::{detail_line_w, BORDER_W, DETAIL_ALPHA};

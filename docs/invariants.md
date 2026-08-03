@@ -249,6 +249,11 @@ read-modify-write 全体ではない。
   （作り直すとアニメ位相がリセットされ、群れが不自然に同期する）。
 - **`Flock::reconfigure` は顔・配置・`BarFit`・倍率が実際に変わったときだけ呼ぶ**
   （`needs_reconfigure` で判定）。毎ポーリングで呼ぶと上と同じ理由で群れが同期する。
+  **顔の同一性は id だけで見ない — 色も比べる**こと。ビルダーで色だけ直して保存すると
+  id も寸法も変わらないので、id しか見ないと組み直されず変更が画面に出ない
+  （`Creature::apply` は状態が同じなら何もしない）。目視できない環境の確認手段として、
+  組み直した直後にだけ `log_face_colors` が色を stderr へ出す ＝ **この行が出たことが
+  描き直された証拠**になる。
 - **`tao::Window::set_visible` を使わない**。中身が `makeKeyAndOrderFront` で、表示の
   たびにフォーカスを奪う。`window::set_visible`（`orderFront:`/`orderOut:`）を使い、窓は
   `with_visible(false)` で作る。あわせて `set_activate_ignoring_other_apps(false)` を
@@ -307,6 +312,21 @@ read-modify-write 全体ではない。
   `FaceSpec` が持ち、`theme.rs` には**全部の顔に共通のもの**だけを置く。色・アニメ・グリフは
   顔ごとに変えられない（状態の読み取りやすさを守るため）。既存の顔の見た目は
   `face/golden.rs` が数値で固定しているので、解決ロジックを触ったら必ず走らせる。
+- **色は「状態ごと」にしか上書きできない**（`[colors.<状態>]` / `spec::StateColors`）。
+  全状態に一律で効く指定を足さないこと。守っているのは「色を変えられないこと」ではなく
+  **「生き物を見れば状態が分かること」**で、1 色で 6 状態を塗り潰せる口を開けた瞬間に
+  それが壊れる。状態ごとに選ばせる限り、見分けは選んだ人の 6 色でそのまま付く。
+- **描く側は `palette::accent` / `palette::face_fill` を直に呼ばない。**
+  必ず `FaceSpec::accent` / `FaceSpec::fill` / `FaceSpec::eye` を通す（`theme.rs` は
+  前 2 つを re-export しない）。直に呼ぶとその経路だけ顔の色を無視して、**1 匹の中で
+  枠とカードの色が食い違う**。ホバーカードが `FaceSpec` を受け取っているのはこのため。
+- **目の色は `[colors.*].eye` に書く。`[eyes.states.*].color` は形とセット**で、
+  書くと既定ルールを丸ごと置き換えるので、色を変えるだけのつもりが瞬きや横目を消す。
+  両方にあれば `[colors.*]` が勝つ。番人は
+  `builder::tests::the_colours_chosen_per_state_reach_the_face`（瞬きが生き残ることを見る）。
+- **書かなかった状態・書かなかった色は既定パレット**。色を触っていない顔の見た目は
+  0.2.0 と 1 ピクセルも変わらない。番人は
+  `svg::tests::a_state_without_colours_keeps_the_default_palette`。
 - **ビルダーは「顔の形式」を増やさない**。出すのは `faces/*.toml` で、しかも
   **TOML テキストを唯一の中間形にする**（`Draft` → テキスト → `parse::parse` → `FaceSpec`）。
   `FaceSpec` を直接組んで「ついでに TOML も書き出す」形にすると、座標の丸めや書き出し漏れで

@@ -86,7 +86,7 @@ pub struct Creature {
     name: Option<Retained<CATextLayer>>,
     dur: Option<Retained<CATextLayer>>,
 
-    /// この生き物が使っている顔。輪郭・目・パネル線はここから解く。
+    /// この生き物が使っている顔。輪郭・目・パネル線・**色**はここから解く。
     face_spec: Arc<FaceSpec>,
     size: Size,
     /// メニューバー高に合わせた詰め方（bar のみ意味を持つ）。
@@ -317,7 +317,7 @@ impl Creature {
             }
         };
 
-        let accent = theme::accent(v.state);
+        let accent = self.face_spec.accent(v.state);
 
         self.paint_body(v.state, accent);
         self.paint_eyes(v.state);
@@ -340,7 +340,7 @@ impl Creature {
     fn paint_body(&self, state: SessionState, accent: theme::Rgb) {
         let s = self.sq.scale;
         self.body
-            .setFillColor(Some(&cgcolor(theme::face_fill(state), 1.0)));
+            .setFillColor(Some(&cgcolor(self.face_spec.fill(state), 1.0)));
         self.body.setStrokeColor(Some(&cgcolor(accent, 1.0)));
         set_glow(
             &self.body,

@@ -258,6 +258,7 @@ impl Overlay {
             packing,
             screen::backing_scale(mtm),
         );
+        log_face_colors(&face);
         if let Some(backing) = window::backing_layer(&creatures_window) {
             backing.addSublayer(flock.layer());
         }
@@ -474,6 +475,10 @@ impl Overlay {
         {
             self.flock
                 .reconfigure(Arc::clone(&self.face), size, self.packing, scale);
+            // **組み直した直後にだけ出す。** そうしておくと、色だけ変えた顔を
+            // 保存したときにこの行が出るかどうかが、そのまま「群れが本当に
+            // 描き直されたか」の証拠になる（画面を見られない環境の検証手段）。
+            log_face_colors(&self.face);
         }
         self.packing != before
     }
@@ -755,6 +760,43 @@ fn log_geometry(m: &geometry::ScreenMetrics, cfg: &Config) {
         m.menu_extra_left,
         cfg.bar_align.as_str(),
         avail_w,
+    );
+}
+
+/// いま群れを組んである顔の、状態ごとの色を出す。
+///
+/// **色は画面を見なければ確かめようがない**ので、目視できない環境（リモート・
+/// スクリーン録画権限なし）向けにジオメトリと同じ扱いでログに残す。
+/// 呼ぶのは群れを組んだ／組み直した直後だけなので、**この行が出たこと自体が
+/// 「描き直された」証拠**になる。書いていない状態は既定パレットなので出さない
+/// — 全部出すと 6 行が常に並んで、自分で選んだ色がどれか読めなくなる。
+fn log_face_colors(face: &FaceSpec) {
+    let mut out = String::new();
+    for state in ccsessions_core::session::SessionState::ORDER {
+        let c = face.colors[ccsessions_core::face::spec::state_index(state)];
+        if c.is_empty() {
+            continue;
+        }
+        let show = |v: Option<(f64, f64, f64)>| match v {
+            Some(v) => ccsessions_core::face::palette::to_hex(v),
+            None => "-".to_string(),
+        };
+        out.push_str(&format!(
+            " {}={}/{}/{}",
+            state.as_str(),
+            show(c.accent),
+            show(c.fill),
+            show(c.eye)
+        ));
+    }
+    log_when_changed!(
+        "ccsessionsd: face colours id={}{}",
+        face.id,
+        if out.is_empty() {
+            " (all default)".to_string()
+        } else {
+            format!(" accent/fill/eye:{out}")
+        },
     );
 }
 

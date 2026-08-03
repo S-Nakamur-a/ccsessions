@@ -49,7 +49,8 @@ use std::path::{Path, PathBuf};
 
 use ccsessions_core::config::{self, FieldKind};
 use ccsessions_core::face::builder::{self, CharacterConfig};
-use ccsessions_core::face::{svg, EyeColor, Registry, Size};
+use ccsessions_core::face::palette;
+use ccsessions_core::face::{svg, Registry, Size};
 use ccsessions_core::lang::{l, Lang};
 use ccsessions_core::session::SessionState;
 use serde_json::{json, Value};
@@ -601,11 +602,12 @@ fn parts_json(lang: Lang) -> Value {
         "states": SessionState::ORDER.iter()
             .map(|s| json!({"id": s.as_str(), "label": s.label(lang), "glyph": s.glyph()}))
             .collect::<Vec<_>>(),
-        "eye_colors": [
-            {"id": EyeColor::Eye.as_str(), "label": l("標準（明るい）", "Default (bright)").get(lang)},
-            {"id": EyeColor::White.as_str(), "label": l("白", "White").get(lang)},
-            {"id": EyeColor::EyeClosed.as_str(), "label": l("くすんだ色", "Muted").get(lang)},
-            {"id": EyeColor::EyeError.as_str(), "label": l("赤", "Red").get(lang)},
+        // 状態ごとに選べる色の欄。**キーは `StateColorCfg` のフィールド名**で、
+        // 画面はこれをそのまま `config.colors[<状態>][<キー>]` へ書く。
+        "color_slots": [
+            {"id": "accent", "label": l("枠・グロー", "Outline & glow").get(lang)},
+            {"id": "fill", "label": l("面", "Fill").get(lang)},
+            {"id": "eye", "label": l("目", "Eyes").get(lang)},
         ],
         "default": CharacterConfig::default(),
     })
@@ -638,13 +640,19 @@ fn preview(body: &str, lang: Lang) -> Result<Value, String> {
             .collect::<Vec<_>>(),
         "warning": c.warning.map(|p| json!({"code": p.code.as_str(), "message": p.message})),
         "main": svg::render(&c.spec, state, size),
-        // 6 状態を並べて見せる。色とアニメは状態が決めるので、
-        // 「色を選ぶ」の代わりにここで実際の配色を確かめてもらう。
+        // 6 状態を並べて見せる。色は状態ごとに選べるので、この帯が
+        // **配色の確認と編集の両方の場所**になる。`colors` はその状態で実際に
+        // 使われている色（既定パレットのぶんも含む）で、画面は色見本の初期値に使う。
         "states": SessionState::ORDER.iter()
             .map(|s| json!({
                 "id": s.as_str(),
                 "label": s.label(lang),
                 "svg": svg::render_chip(&c.spec, *s, Size::Dock),
+                "colors": {
+                    "accent": palette::to_hex(c.spec.accent(*s)),
+                    "fill": palette::to_hex(c.spec.fill(*s)),
+                    "eye": palette::to_hex(c.spec.eye(*s, Size::Dock).color),
+                },
             }))
             .collect::<Vec<_>>(),
         "thumbs": thumbs(&cfg, state),
@@ -1264,6 +1272,81 @@ mod tests {
                 .as_str()
                 .is_some_and(|p| !p.is_empty()),
             "{ignore}"
+        );
+    }
+
+    /// 状態ごとの色の欄が `/api/parts` から届き、`/api/preview` の各状態が
+    /// 「いま実際に使っている色」を返す（色見本の初期値になる）。
+    #[test]
+    fn the_builder_is_served_a_colour_slot_per_state() {
+        let dir = TempDir::new().unwrap();
+        let (s, body) = get("/api/parts", dir.path());
+        assert_eq!(s, 200, "{body}");
+        let v: Value = serde_json::from_str(&body).unwrap();
+        let slots: Vec<&str> = v["color_slots"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(slots, vec!["accent", "fill", "eye"]);
+
+        let (s, body) = post("/api/preview", &default_json(), dir.path());
+        assert_eq!(s, 200, "{body}");
+        let v: Value = serde_json::from_str(&body).unwrap();
+        for st in v["states"].as_array().unwrap() {
+            for slot in ["accent", "fill", "eye"] {
+                let c = st["colors"][slot].as_str().unwrap();
+                assert!(
+                    c.starts_with('#') && c.len() == 7,
+                    "{} の {slot} が 16 進の色でない: {c}",
+                    st["id"]
+                );
+            }
+        }
+    }
+
+    /// 状態ごとに選んだ色が、プレビューにも保存される TOML にも出る。
+    /// **選んでいない状態は既定パレットのまま**であることも同時に見る。
+    #[test]
+    fn the_colours_chosen_in_the_builder_reach_the_preview_and_the_toml() {
+        let dir = TempDir::new().unwrap();
+        let mut cfg: Value = serde_json::from_str(&default_json()).unwrap();
+        cfg["colors"] = json!({
+            "working": {"accent": "#7f3ac2", "fill": "#241038", "eye": "#00ff88"}
+        });
+        cfg["preview"]["state"] = json!("working");
+
+        let (s, body) = post("/api/preview", &cfg.to_string(), dir.path());
+        assert_eq!(s, 200, "{body}");
+        let v: Value = serde_json::from_str(&body).unwrap();
+
+        let main = v["main"].as_str().unwrap();
+        assert!(main.contains("#7f3ac2"), "枠が選んだ色でない:\n{main}");
+        assert!(main.contains("#241038"), "面が選んだ色でない:\n{main}");
+        assert!(main.contains("#00ff88"), "目が選んだ色でない:\n{main}");
+
+        // 保存されるファイルにも同じ色が入る（画面と保存物が食い違わない）。
+        let toml = v["toml"].as_str().unwrap();
+        assert!(toml.contains("[colors.working]"), "{toml}");
+        assert!(toml.contains("accent = \"#7f3ac2\""), "{toml}");
+        assert!(
+            !toml.contains("[colors.error]"),
+            "選んでいない状態が出ている"
+        );
+
+        // 選んでいない状態は既定パレットのまま。
+        let err = v["states"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == "error")
+            .unwrap();
+        assert_eq!(
+            err["colors"]["accent"],
+            ccsessions_core::face::palette::to_hex(ccsessions_core::face::palette::accent(
+                SessionState::Error
+            ))
         );
     }
 

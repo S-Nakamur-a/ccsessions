@@ -214,8 +214,11 @@ impl Flock {
         self.size != size
             || self.packing != packing
             || self.scale != scale
-            // 顔は id で見る（同じ id なら中身も同じ。リロードで Arc が変わるだけ）。
+            // 顔は id と色で見る。**色を id と別に見るのが要点** — ビルダーで色だけ
+            // 直して保存し直すと id は同じままなので、id しか見ないと変更が画面に出ない
+            // （形を直したときは寸法が変わって別経路で組み直されるが、色は何も動かさない）。
             || self.face.id != face.id
+            || self.face.colors != face.colors
     }
 
     /// ウィンドウ座標（左下原点）から何匹目かを引く。
@@ -254,6 +257,7 @@ impl Flock {
             self.size,
             self.scale,
             reduce_motion,
+            &self.face,
         )
     }
 

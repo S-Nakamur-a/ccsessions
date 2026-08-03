@@ -311,27 +311,47 @@ h2:first-child { margin-top: 0; }
   cursor: pointer;
 }
 .state.on { border-color: var(--accent); }
+/* 色を選んである状態の目印。選択枠（実線）と読み違えないよう破線にする。 */
+.state.tinted { border-color: var(--line); border-style: dashed; }
+.state.on.tinted { border-color: var(--accent); border-style: solid; }
 .state svg { width: 100%; height: auto; border-radius: 6px; }
 .state .name { font-size: 9.5px; color: var(--dim); }
 
 .hint { color: var(--dim); font-size: 11px; margin: 10px 0 4px; }
 .hint strong { color: var(--text); font-weight: 600; }
 
-.eyecolor {
+/* 選んだ状態の色。欄の数は color_slots が決めるので、幅は中身に任せる。 */
+#state-colors {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 10px;
   margin-top: 10px;
-  color: var(--dim);
   font-size: 11px;
 }
-.eyecolor select {
-  padding: 4px 8px;
+#state-colors .field-label { color: var(--text); font-size: 11px; }
+#state-colors .hint { margin: 0; }
+#state-colors button { padding: 3px 9px; font-size: 11px; }
+.slot {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--dim);
+  cursor: pointer;
+}
+/* 自分で選んだ欄は明るくする（既定パレットのままの欄と見分けるため）。 */
+.slot.set { color: var(--text); }
+.slot input[type="color"] {
+  width: 34px;
+  height: 22px;
+  padding: 1px;
   background: var(--ink);
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 6px;
+  cursor: pointer;
 }
+.slot.set input[type="color"] { border-color: var(--accent); }
 
 /* ── 右側 ──────────────────────────────────────────────────────────────── */
 
