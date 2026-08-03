@@ -74,9 +74,11 @@ const T = {
   'picker.partsFail':  ['パーツ一覧を取れません: ', 'cannot load the part list: '],
   'size.dock':         ['dock（画面下）', 'dock (bottom of screen)'],
   'size.bar':          ['bar（メニューバー）', 'bar (menu bar)'],
-  'stage.stateHint':   ['色とアニメは<strong>状態</strong>が決める（顔ごとには変えられない）。6 つ並べて実際の配色を確かめる。',
-                        'Colour and motion are decided by the <strong>state</strong> (they cannot vary per face). All six are shown so you can check the real palette.'],
-  'stage.eyeColor':    ['目の色', 'Eye colour'],
+  'stage.stateHint':   ['色は<strong>状態ごと</strong>に決める。6 つ並べて配色を確かめ、選んだ状態の色をその下で変える。アニメと記号は状態が決める（顔では変えられない）。',
+                        'Colours are chosen <strong>per state</strong>. All six are shown so you can check the palette; the colours of the selected one are edited below. Motion and glyphs are decided by the state (they cannot vary per face).'],
+  'stage.colorsOf':    ['{} の色', 'Colours for {}'],
+  'stage.colorAuto':   ['自動', 'automatic'],
+  'stage.colorReset':  ['この状態を自動に戻す', 'Reset this state'],
   'tweak.onBar':       ['メニューバー（bar）にも描く', 'Draw in the menu bar too'],
   'tweak.onBarHint':   ['bar は狭いので、線を増やすとシルエットと目が読みにくくなる。',
                         'The bar is narrow: more lines make the silhouette and eyes harder to read.'],
@@ -190,7 +192,6 @@ async function bootBuilder() {
   state.config = clone(state.meta.default);
 
   buildTabs();
-  buildEyeColors();
   bindHeader();
   bindKeys();
   syncIdent();
@@ -252,7 +253,6 @@ async function reloadBuilderText() {
     return;
   }
   buildTabs();
-  buildEyeColors();
   refresh();
   loadSavedList();
 }
@@ -618,7 +618,12 @@ function renderPreview(res) {
   row.textContent = '';
   for (const s of res.states) {
     const cell = el('div');
-    cell.className = 'state' + (s.id === state.config.preview.state ? ' on' : '');
+    // `tinted` は「この状態は色を選んである」の目印。状態ごとに選べることが
+    // 帯を見ただけで分かるようにする（選択中の状態しか色の欄は出ないので）。
+    cell.className =
+      'state' +
+      (s.id === state.config.preview.state ? ' on' : '') +
+      (hasColors(s.id) ? ' tinted' : '');
     const box2 = el('div');
     box2.innerHTML = s.svg;
     cell.append(box2, el('span', s.label, 'name'));
@@ -628,11 +633,64 @@ function renderPreview(res) {
     };
     row.append(cell);
   }
+  renderStateColors(res);
 
   $('#fit').textContent =
     res.eye_fit < 0.999
       ? trf('stage.eyeShrunk', Math.round(res.eye_fit * 100))
       : '';
+}
+
+/** その状態に 1 つでも色を選んであるか。 */
+function hasColors(stateId) {
+  const c = state.config.colors[stateId];
+  return !!c && Object.values(c).some((v) => v);
+}
+
+/**
+ * 選んでいる状態の色。**欄は `/api/parts` の `color_slots` から組み立てる**ので、
+ * 色の種類が増えてもここは触らなくてよい。
+ *
+ * 色見本の初期値には、いまその状態で実際に使われている色（サーバが返した
+ * `s.colors`）を入れる。既定パレットのままの状態を開いたとき、いきなり黒や白が
+ * 出ると「今の色」が分からないため。
+ */
+function renderStateColors(res) {
+  const box = $('#state-colors');
+  box.textContent = '';
+  const id = state.config.preview.state;
+  const s = res.states.find((x) => x.id === id);
+  if (!s) return;
+
+  box.append(el('span', trf('stage.colorsOf', s.label), 'field-label'));
+  for (const slot of state.meta.color_slots) {
+    const chosen = (state.config.colors[id] || {})[slot.id] || '';
+    const wrap = el('label', '', 'slot' + (chosen ? ' set' : ''));
+    const input = el('input');
+    input.type = 'color';
+    input.value = chosen || s.colors[slot.id];
+    input.onchange = () => setStateColor(id, slot.id, input.value);
+    wrap.append(input, el('span', slot.label, 'name'));
+    box.append(wrap);
+  }
+
+  if (hasColors(id)) {
+    const b = el('button', tr('stage.colorReset'));
+    b.onclick = () => {
+      delete state.config.colors[id];
+      refresh();
+    };
+    box.append(b);
+  } else {
+    box.append(el('span', tr('stage.colorAuto'), 'hint'));
+  }
+}
+
+function setStateColor(stateId, slot, value) {
+  const c = state.config.colors[stateId] || { accent: '', fill: '', eye: '' };
+  c[slot] = value;
+  state.config.colors[stateId] = c;
+  refresh();
 }
 
 function renderProblems(res) {
@@ -657,28 +715,13 @@ function problemRow(code, message, cls) {
 }
 
 // ---------------------------------------------------------------------------
-// 名前・id・目の色
+// 名前・id
 // ---------------------------------------------------------------------------
 
 function syncIdent() {
   $('#f-name').value = state.config.name;
   $('#f-id').value = state.config.id;
   $('#f-author').value = state.config.author || '';
-  $('#f-eyecolor').value = state.config.eye_color;
-}
-
-function buildEyeColors() {
-  const sel = $('#f-eyecolor');
-  sel.textContent = '';
-  for (const c of state.meta.eye_colors) {
-    const o = el('option', c.label);
-    o.value = c.id;
-    sel.append(o);
-  }
-  sel.onchange = () => {
-    state.config.eye_color = sel.value;
-    refresh();
-  };
 }
 
 function bindHeader() {

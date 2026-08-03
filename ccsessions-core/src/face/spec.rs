@@ -9,10 +9,15 @@
 //! **左下原点・y は上向き**（CALayer と同じ）。pt で持つのは `size` / `gap` /
 //! `radius` / `corners_pt` / 目の `size` だけ。
 //!
-//! # 顔が決められないもの
-//! 色・アニメ・グリフは顔ごとに変えられない。状態の読み取りやすさ
-//! （シアン＝作業中、琥珀＝判断待ち…）が壊れるため。顔が状態を表現する余地は
-//! **目の形・開き具合・向き**に閉じている。
+//! # 色は「状態ごとに」顔が決められる
+//! `[colors.<状態>]` を書いた状態だけ、accent（枠・グロー・状態記号・バッジ・
+//! 名前・ホバーカードの縁）・面の塗り・目の色を顔が上書きできる。
+//! **状態ごとに別の色を選べることが条件**で、これがあるから
+//! 「シアン＝作業中、琥珀＝判断待ち」の対応を自分の 6 色で置き直せる
+//! （1 色で全状態を塗り潰す口は用意しない — 状態が読めなくなる）。
+//! 書かなかった状態・書かなかった色は状態の既定パレット（`face::palette`）。
+//!
+//! アニメとグリフは今も顔ごとに変えられない。
 
 use crate::face::palette::{self, Rgb};
 use crate::face::{outline, seg_to, Corners, Outline, Seg, Size};
@@ -243,6 +248,40 @@ impl EyeColor {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 状態ごとの色
+// ---------------------------------------------------------------------------
+
+/// 1 状態ぶんの色の上書き。`None` は「状態の既定パレットに任せる」。
+///
+/// # なぜ accent と面を分けて持つのか
+/// accent は**状態を運んでいる色**（枠・外向きグロー・内側グロー・パネル線・
+/// 状態記号・バッジの枠・dock の名前・ホバーカードの縁）で、面はその内側の塗り。
+/// 2 つを 1 つにまとめると、元デザインの「枠で状態を読ませ、面は沈める」という
+/// 明暗の関係を顔の作者が作れなくなる。
+///
+/// # なぜ「状態ごと」しか無いのか
+/// 全状態に一律で効く色を持たせると 6 状態が一色に潰れ、生き物を見ても状態が
+/// 分からなくなる。**状態ごとに選ばせる**なら、色を変えても状態の見分けは
+/// 顔の作者が選んだ 6 色でそのまま付く。
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct StateColors {
+    /// 枠・グロー・状態記号・バッジ・名前・ホバーカードの縁。
+    pub accent: Option<Rgb>,
+    /// 体の面の塗り。
+    pub fill: Option<Rgb>,
+    /// 目。`[eyes.states.*].color`（名前で選ぶ 4 色）より**こちらが優先**する
+    /// — 自由な色を書いた人が、名前の色に負けて「効かない」と読むのを避ける。
+    pub eye: Option<Rgb>,
+}
+
+impl StateColors {
+    /// 1 色も指定していないか。書き出し側が「この状態は行ごと省く」判断に使う。
+    pub fn is_empty(&self) -> bool {
+        self.accent.is_none() && self.fill.is_none() && self.eye.is_none()
+    }
+}
+
 /// 状態ごとの目の上書き。**書かなかった状態には既定ルールが適用される**ので、
 /// 投稿者はシルエットだけ書けば全 6 状態が成立する。
 ///
@@ -364,10 +403,31 @@ pub struct FaceSpec {
     pub outline: OutlineSpec,
     pub eyes: EyesSpec,
     pub details: Vec<DetailSpec>,
+    /// 状態ごとの色の上書き。`SessionState::ORDER` と同じ並び（`eyes.states` と同じ流儀）。
+    /// 全部既定なら要素はすべて空で、そのとき見た目は 0.2.0 と 1 ピクセルも変わらない。
+    pub colors: [StateColors; 6],
     pub source: Source,
 }
 
 impl FaceSpec {
+    /// この状態の accent（枠・外向きグロー・内側グロー・パネル線・状態記号・
+    /// バッジの枠・dock の名前・ホバーカードの縁）。
+    ///
+    /// **描く側は必ずこれを通す**。`palette::accent` を直に呼ぶと、その経路だけ
+    /// 顔の色を無視して状態の既定色で描かれる（＝ 1 匹の中で色が食い違う）。
+    pub fn accent(&self, state: SessionState) -> Rgb {
+        self.colors[state_index(state)]
+            .accent
+            .unwrap_or_else(|| palette::accent(state))
+    }
+
+    /// この状態の面の塗り。同じ理由で `palette::face_fill` を直に呼ばない。
+    pub fn fill(&self, state: SessionState) -> Rgb {
+        self.colors[state_index(state)]
+            .fill
+            .unwrap_or_else(|| palette::face_fill(state))
+    }
+
     /// 体の矩形（pt）。
     pub fn body_size(&self, size: Size) -> (f64, f64) {
         let s = self.size.get(size);
@@ -442,7 +502,7 @@ impl FaceSpec {
         };
         let dy = (self.eyes.v - 0.5) * bh;
 
-        match self.eyes.states[state_index(state)] {
+        let base = match self.eyes.states[state_index(state)] {
             Some(o) => EyeSpec {
                 w: w0 * o.w_scale,
                 h: h0 * o.h_scale,
@@ -454,6 +514,13 @@ impl FaceSpec {
                 blink: o.blink,
             },
             None => default_eye(self.eyes.shape, state, w0, h0, r0, dy),
+        };
+        // 色だけをここで差し替える。**`[eyes.states.*]` とは別の口**なのが要点で、
+        // あちらは書くと既定ルールを丸ごと置き換えるので、色を変えるだけのつもりで
+        // 書くと瞬きや横目が消える。`[colors.*]` は形に一切触らない。
+        match self.colors[state_index(state)].eye {
+            Some(c) => EyeSpec { color: c, ..base },
+            None => base,
         }
     }
 
@@ -823,6 +890,7 @@ mod tests {
                 dock: BodySize { w: 36.0, h: 34.0 },
             },
             outline,
+            colors: [StateColors::default(); 6],
             eyes: EyesSpec {
                 shape: EyeShape::Rounded,
                 v: 0.5,

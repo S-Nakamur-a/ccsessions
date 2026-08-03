@@ -79,6 +79,9 @@ struct Frame {
 }
 
 /// 顔 1 つを 1 枚の SVG にする。
+///
+/// 色は**顔が持っている**（`[colors.<状態>]`）ので、ここに色の引数は無い。
+/// 同じ顔ファイルからは誰の手元でも同じ絵が出る。
 pub fn render(face: &FaceSpec, state: SessionState, size: Size) -> String {
     render_with(
         face,
@@ -124,8 +127,10 @@ fn render_with(face: &FaceSpec, state: SessionState, size: Size, frame: Frame) -
     let pad = frame.pad;
     let (w, h) = (bw + pad * 2.0, bh + pad * 2.0);
 
-    let accent = palette::accent(state);
-    let fill = palette::face_fill(state);
+    // **顔の解決関数を通す**（`palette` を直に引かない）。顔が `[colors.<状態>]` を
+    // 持っていればその色、書いていなければ状態の既定色が返る。
+    let accent = face.accent(state);
+    let fill = face.fill(state);
     let opacity = palette::face_opacity(state);
 
     let mut s = String::new();
@@ -260,9 +265,11 @@ fn path_d(o: &crate::face::Outline, flip_h: f64) -> String {
 }
 
 /// sRGB 成分（0..1）を `#rrggbb` にする。
+///
+/// 実体は `palette::to_hex`。設定に書く色と SVG に書く色で書式がずれないよう、
+/// 変換は 1 か所に置いてある。
 fn hex(c: Rgb) -> String {
-    let b = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    format!("#{:02x}{:02x}{:02x}", b(c.0), b(c.1), b(c.2))
+    palette::to_hex(c)
 }
 
 /// XML の特殊文字を逃がす。顔の id / label はユーザ入力なので必ず通す。
@@ -457,6 +464,62 @@ mod tests {
         assert!(s.contains("<text"), "ギャラリー側のグリフが消えている");
     }
 
+    /// 顔が `[colors.<状態>]` に書いた色が、その状態の SVG に実際に出る。
+    ///
+    /// accent は**枠とパネル線の両方**に出るので、片方だけ差し替える取り違えを
+    /// ここで捕まえる。
+    #[test]
+    fn the_colours_a_face_declares_reach_the_svg() {
+        let face = coloured_face();
+        let s = render(&face, SessionState::Working, Size::Dock);
+        assert!(
+            s.contains(r##"stroke="#7f3ac2""##),
+            "枠が顔の色でない:\n{s}"
+        );
+        assert!(s.contains(r##"fill="#241038""##), "面が顔の色でない:\n{s}");
+        assert!(s.contains(r##"fill="#00ff88""##), "目が顔の色でない:\n{s}");
+        // パネル線も accent なので同じ色になる。
+        assert!(
+            s.matches(r##""#7f3ac2""##).count() >= 2,
+            "パネル線が顔の accent を使っていない:\n{s}"
+        );
+    }
+
+    /// **書かなかった状態は既定パレットのまま**。1 状態だけ塗った顔で、
+    /// 他の 5 状態が動かないことを見る（既存の顔の見た目を守る番人）。
+    #[test]
+    fn a_state_without_colours_keeps_the_default_palette() {
+        let face = coloured_face();
+        for state in SessionState::ORDER {
+            if state == SessionState::Working {
+                continue;
+            }
+            let s = render(&face, state, Size::Dock);
+            assert!(
+                s.contains(&format!(r#"stroke="{}""#, hex(palette::accent(state)))),
+                "{} の枠が既定色から動いている",
+                state.as_str()
+            );
+            assert!(
+                s.contains(&format!(r#"fill="{}""#, hex(palette::face_fill(state)))),
+                "{} の面が既定色から動いている",
+                state.as_str()
+            );
+        }
+    }
+
+    /// 色を書いていない組込みの顔は、状態のパレットどおりに描かれる。
+    #[test]
+    fn a_face_without_colours_renders_exactly_what_the_state_palette_says() {
+        let reg = Registry::builtin();
+        let face = reg.get("egg").unwrap();
+        for state in SessionState::ORDER {
+            let s = render(face, state, Size::Dock);
+            assert!(s.contains(&format!(r#"fill="{}""#, hex(palette::face_fill(state)))));
+            assert!(s.contains(&format!(r#"stroke="{}""#, hex(palette::accent(state)))));
+        }
+    }
+
     /// **SVG の座標が解決関数の値そのもの**であること（プレビューの忠実さの根拠）。
     ///
     /// 組込み顔はどれも角丸の輪郭・線画なしなので、**パネル線と自由なシルエットを
@@ -513,6 +576,37 @@ mod tests {
     }
 
     /// パネル線と自由なシルエットを持つ顔（組込みには無い組み合わせ）。
+    /// `[colors.working]` を持つ顔。線画も持たせて、accent がパネル線にも
+    /// 効くことを 1 つのフィクスチャで見られるようにする。
+    fn coloured_face() -> crate::face::FaceSpec {
+        crate::face::parse::parse(
+            r##"
+id = "coloured"
+label = "色つき"
+[size]
+bar  = { w = 22, h = 20 }
+dock = { w = 36, h = 34 }
+[outline]
+kind = "corners"
+corners = [[0.5,0.5],[0.5,0.5],[0.5,0.5],[0.5,0.5]]
+[eyes]
+shape = "rounded"
+gap  = { bar = 3.0, dock = 5.0 }
+size = { bar = [3.0, 4.0], dock = [4.0, 6.0] }
+[[details]]
+name = "brow"
+sizes = ["bar", "dock"]
+points = [[0.19,0.725],[0.50,0.775],[0.81,0.725]]
+[colors.working]
+accent = "#7f3ac2"
+fill   = "#241038"
+eye    = "#00ff88"
+"##,
+            crate::face::Source::Builtin,
+        )
+        .expect("フィクスチャがパースできない")
+    }
+
     fn lined_face() -> crate::face::FaceSpec {
         crate::face::parse::parse(
             r#"

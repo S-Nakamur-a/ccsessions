@@ -11,9 +11,10 @@
 
 use serde::Deserialize;
 
+use crate::face::palette::{self, Rgb};
 use crate::face::spec::{
     BodySize, BySize, CornerSpec, DetailSpec, EyeColor, EyeOverride, EyeShape, EyesSpec, FaceSpec,
-    OutlineSpec, Problem, ProblemCode, Source,
+    OutlineSpec, Problem, ProblemCode, Source, StateColors,
 };
 use crate::face::{Seg, Size};
 use crate::session::SessionState;
@@ -49,6 +50,19 @@ struct RawFace {
     eyes: RawEyes,
     #[serde(default)]
     details: Vec<RawDetail>,
+    /// 状態ごとの色。**書かなければ空**で、そのとき色は全部状態の既定パレット
+    /// （＝ 0.2.0 までに書かれた顔ファイルは 1 行も直さずに同じ見た目で読める）。
+    #[serde(default)]
+    colors: std::collections::BTreeMap<String, RawStateColors>,
+}
+
+/// `[colors.<状態>]`。3 つとも省略でき、省いた色は状態の既定パレット。
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawStateColors {
+    accent: Option<String>,
+    fill: Option<String>,
+    eye: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -158,6 +172,7 @@ fn build(raw: RawFace, source: Source) -> Result<FaceSpec, Vec<Problem>> {
     let outline = build_outline(&raw.outline, &mut problems);
     let eyes = build_eyes(&raw.eyes, &mut problems);
     let details = build_details(&raw.details, &mut problems);
+    let colors = build_colors(&raw.colors, &mut problems);
 
     match (outline, eyes) {
         (Some(outline), Some(eyes)) if problems.is_empty() => Ok(FaceSpec {
@@ -169,6 +184,7 @@ fn build(raw: RawFace, source: Source) -> Result<FaceSpec, Vec<Problem>> {
             outline,
             eyes,
             details,
+            colors,
             source,
         }),
         _ => {
@@ -363,6 +379,51 @@ fn build_eyes(raw: &RawEyes, problems: &mut Vec<Problem>) -> Option<EyesSpec> {
         polygon: raw.polygon.clone(),
         states,
     })
+}
+
+/// `[colors.<状態>]` を状態順の配列に畳む。
+///
+/// 未知の状態名も読めない色も**問題として積む**（`deny_unknown_fields` と同じ判断で、
+/// 「書いたのに効かない」を黙って通さない）。
+fn build_colors(
+    raw: &std::collections::BTreeMap<String, RawStateColors>,
+    problems: &mut Vec<Problem>,
+) -> [StateColors; 6] {
+    let mut out = [StateColors::default(); 6];
+    for (key, c) in raw {
+        let Some(state) = SessionState::from_str(key) else {
+            problems.push(Problem::new(
+                ProblemCode::Parse,
+                format!(
+                    "colors.{key} is an unknown state (must be working / wait_user / \
+                     wait_agent / idle / done / error)"
+                ),
+            ));
+            continue;
+        };
+        let mut one = |field: &str, v: &Option<String>| -> Option<Rgb> {
+            let v = v.as_deref()?;
+            match palette::parse_hex(v) {
+                Some(c) => Some(c),
+                None => {
+                    problems.push(Problem::new(
+                        ProblemCode::Parse,
+                        format!(
+                            "colors.{key}.{field} is {v:?} \
+                             (must be a hex colour such as \"#7f3ac2\")"
+                        ),
+                    ));
+                    None
+                }
+            }
+        };
+        out[crate::face::spec::state_index(state)] = StateColors {
+            accent: one("accent", &c.accent),
+            fill: one("fill", &c.fill),
+            eye: one("eye", &c.eye),
+        };
+    }
+    out
 }
 
 fn build_details(raw: &[RawDetail], problems: &mut Vec<Problem>) -> Vec<DetailSpec> {

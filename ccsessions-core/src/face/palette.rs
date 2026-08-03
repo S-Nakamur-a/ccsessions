@@ -2,9 +2,12 @@
 //!
 //! `ccsessions`（CLI）が `ccsessionsd` に依存せずに顔の SVG プレビューを描けるよう、
 //! ここへ色を置く。色を 2 か所に持つと単一の真実が壊れるので、
-//! **色の定義はここが唯一の場所**にする。顔ごとに色は変えられない（状態と色の
-//! 対応が読み取りやすさの核なので）。`ccsessionsd/src/theme.rs` はここから
-//! re-export するので、`theme.rs` を見れば色が分かる状態は保つ。
+//! **既定色の定義はここが唯一の場所**にする。`ccsessionsd/src/theme.rs` は
+//! ここから re-export するので、`theme.rs` を見れば色が分かる状態は保つ。
+//!
+//! ここにあるのは**既定のパレット**。顔は `[colors.<状態>]` で状態ごとに
+//! 上書きできる（`face::spec::StateColors`）ので、描く側は `palette` を直に
+//! 引かず `FaceSpec::accent` / `FaceSpec::fill` / `FaceSpec::eye` を通すこと。
 
 use crate::session::SessionState;
 
@@ -58,6 +61,38 @@ pub fn face_opacity(s: SessionState) -> f32 {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 16 進表記との変換（顔の `[colors.*]` と SVG 出力が共有する）
+// ---------------------------------------------------------------------------
+
+/// `#rrggbb`（`#rgb` の短縮も可）を sRGB 成分にする。読めなければ `None`。
+///
+/// 前後の空白と大文字は許す（手で設定ファイルを書いたときに叱らないため）。
+/// `#` の省略は許さない — 色だと分かる書き方を 1 つに保つ。
+pub fn parse_hex(s: &str) -> Option<Rgb> {
+    let h = s.trim().strip_prefix('#')?;
+    if !h.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let byte = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
+    let (r, g, b) = match h.len() {
+        6 => (byte(0)?, byte(2)?, byte(4)?),
+        // `#abc` は `#aabbcc`。CSS と同じ短縮。
+        3 => {
+            let d = |i: usize| u8::from_str_radix(&h[i..i + 1], 16).ok().map(|v| v * 17);
+            (d(0)?, d(1)?, d(2)?)
+        }
+        _ => return None,
+    };
+    Some((r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0))
+}
+
+/// sRGB 成分（0..1）を `#rrggbb` にする。範囲外はクランプする。
+pub fn to_hex(c: Rgb) -> String {
+    let b = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", b(c.0), b(c.1), b(c.2))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,5 +108,35 @@ mod tests {
                 _ => assert_eq!(o, 1.0),
             }
         }
+    }
+
+    #[test]
+    fn a_hex_colour_round_trips() {
+        for s in ["#000000", "#ffffff", "#7f3ac2", "#0b0912"] {
+            assert_eq!(to_hex(parse_hex(s).unwrap()), s);
+        }
+    }
+
+    /// 手で書いたときに叱らない範囲（大文字・前後の空白・3 桁）。
+    #[test]
+    fn upper_case_padding_and_the_short_form_are_accepted() {
+        assert_eq!(parse_hex("#FF0000"), parse_hex("#ff0000"));
+        assert_eq!(parse_hex("  #ff0000  "), parse_hex("#ff0000"));
+        assert_eq!(parse_hex("#f00"), parse_hex("#ff0000"));
+        assert_eq!(parse_hex("#abc"), parse_hex("#aabbcc"));
+    }
+
+    /// 読めない値は `None`。ここで弾くので、描画側に壊れた色は届かない。
+    #[test]
+    fn a_malformed_colour_is_rejected() {
+        for s in ["", "#", "auto", "ff0000", "#gggggg", "#12345", "#1234567"] {
+            assert_eq!(parse_hex(s), None, "{s:?} を色として受けてはいけない");
+        }
+    }
+
+    /// 範囲外の成分でも `to_hex` は 2 桁 16 進を返す（描画が壊れない番人）。
+    #[test]
+    fn out_of_range_components_are_clamped() {
+        assert_eq!(to_hex((-1.0, 2.0, f64::NAN)), "#00ff00");
     }
 }
